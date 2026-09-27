@@ -1,0 +1,12 @@
+# Local credentials and machine-specific files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+
+# Generated firmware output
+.pio/
+build/
+__pycache__/
+*.pyc
