@@ -2,6 +2,8 @@
 
 **Draft for implementation · Revision 2 · 27 September 2026**
 
+**29 September prototype note:** The first [ST-1 firmware](../firmware/controller/README.md) selects the Adafruit MagTag (ESP32-S2), its front buttons/eInk/LEDs/speaker, D10 IR drive and A1/GPIO18 TSSP77038 reception at 3.3 V. ST-1 has TX and RX for Flying mode and no passive reflector. The controller README records provisional group arm, three-second countdown, 30-second group deadline, beam qualification and wire contract choices. These are bench defaults, not measured performance requirements. Per-lane rearm, other device firmware and timing validation remain outstanding; system-wide open choices below still apply.
+
 ## 1. Status and scope
 
 This document translates the agreed concept into hardware and firmware responsibilities. It is a standalone build, with no dependency on JNS_Timing code, JNS Pro, AppGatePro, or AppSprints.

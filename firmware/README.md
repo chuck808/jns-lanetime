@@ -1,6 +1,6 @@
 # Firmware overview
 
-One repository, five planned firmware targets. Lane numbers are configuration values, not separate codebases. No executable firmware or build framework has been selected yet.
+One repository, five planned firmware targets. Lane numbers are configuration values, not separate codebases. ST-1 now has an Arduino/PlatformIO MagTag prototype; other targets remain responsibility notes. Shared code contains the initial wire encoder/decoder.
 
 | Target | Devices | Responsibilities |
 | --- | --- | --- |

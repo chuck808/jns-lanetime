@@ -1,0 +1,19 @@
+name: ST-1 firmware
+on:
+  push:
+    paths: ['firmware/controller/**', 'firmware/shared/**', '.github/workflows/controller.yml']
+  pull_request:
+    paths: ['firmware/controller/**', 'firmware/shared/**', '.github/workflows/controller.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - run: sh firmware/controller/tests/run.sh
+      - run: pio run -d firmware/controller -e magtag -e magtag_legacy -e magtag_bench
