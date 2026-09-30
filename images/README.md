@@ -1,4 +1,4 @@
-# Device concept mock-ups
+# Device and interface concept mock-ups
 
 AI-generated visual concepts developed during design discussion. These depict the agreed design direction, not verified dimensions, component choices, or weatherproof construction. Only the current variants are included here.
 
@@ -39,3 +39,11 @@ LN-1 shown with a four-digit LED readout of 1.750 seconds. The same enclosure de
 Four Neo7 Mini digit modules per case are the proposed prototype approach. Module dimensions, decimal-point provision, electrical requirements, and outdoor readability still need confirming. The shallow sun hood and amber colour are illustrative. A later change to `00.00`, or five digits for `00.000`, remains possible.
 
 ![LN-1 lane result display](ln-1-result-display.png)
+
+## Mobile interface concept
+
+Three screens explore the future coach interface: session setup, armed/start controls, and lane results. The Standing-mode example uses large controls, clear lane status, and the charcoal-and-lime design language. Flying mode would wait for beam breaks instead of offering a countdown.
+
+This is a visual concept, not an implemented mobile app or a change to the current physical-controller baseline. Connection indicators and times are illustrative; three decimal places do not establish timing accuracy. Phone/browser control remains deferred.
+
+![Mobile interface: setup, armed and results](mobile-interface-concept.png)
