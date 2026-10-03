@@ -2,36 +2,62 @@
 
 Standalone ESP-NOW timing system for 1–4 BMX lanes, supporting standing and flying starts, coach-operated controls, and per-lane time displays.
 
+## What it is for
+
+Club sprint training over short distances (around 30 m or less). Up to four riders go side by side, each lane timed independently, so a coach can compare efforts rep by rep without a stopwatch.
+
+- **Flying:** riders roll in at speed. Each lane's clock starts when its rider breaks the start beam and stops at the finish beam.
+- **Standing:** riders start from a standstill on a shared countdown. Every start post sounds the same cue at the same instant, and every lane's clock starts at GO.
+
+It was built for a local club as an affordable, quick-to-deploy alternative to commercial multi-lane timing systems. It has no subscription, no rider profiles, no phone pairing and no per-session configuration: each unit is built with its lane and role fixed.
+
+## How it is laid out
+
+Each timing line is a row of posts, one between each pair of lanes. A powered post emits a beam across the lane on one side and carries the reflector for the lane on its other side. A passive end-cap closes the line. N lanes need N powered posts plus one end-cap per line.
+
+```
+          lane 1     lane 2     lane 3     lane 4
+FINISH  [FN-1] ───▶ ▮[FN-2] ───▶ ▮[FN-3] ───▶ ▮[FN-4] ───▶ ▮[FN-5]
+             ↑          ↑          ↑          ↑
+             │  riders travel up the page     │
+             │          │          │          │
+START   [ST-1] ───▶ ▮[ST-2] ───▶ ▮[ST-3] ───▶ ▮[ST-4] ───▶ ▮[ST-5]
+
+───▶  940 nm IR beam, retroreflected back to its source
+▮     reflector face        ST-5 / FN-5  passive end-caps (no electronics)
+```
+
+The result displays (LN-1 to LN-4) stand beyond the finish line, facing the riders and coach.
+
+| Name | Unit |
+| --- | --- |
+| ST-1 | Main controller and lane 1 start post: coach buttons, setup screen, countdown |
+| ST-2–ST-4 | Start posts for lanes 2–4; sound the Standing cue |
+| FN-1–FN-4 | Finish posts; each times its own lane |
+| ST-5 / FN-5 | Passive reflector end-caps, not a fifth lane |
+| LN-1–LN-4 | Lane result displays |
+
+## Timing model
+
+ST-1's clock is the common timebase. Its 500 ms heartbeat carries its own timestamp, and every other unit continuously estimates its offset from it. Beam events and the Standing GO are exchanged as timestamps in that timebase, so radio latency, retries and late delivery do not affect a result. They only affect how soon it appears. Sync error, drift and sensing latency still need measuring; no timing accuracy is claimed yet.
+
 ## Project status
 
-Prototype development for local club use. The first [ST-1 MagTag firmware](firmware/controller/) is implemented, with live-radio and isolated bench builds. Other device firmware remains to be built. The device images are concept mock-ups, not manufacturing drawings or evidence of tested hardware.
+Prototype for local club use. The first [ST-1 MagTag firmware](firmware/controller/) is implemented, with live-radio and isolated bench builds. Other device firmware remains to be built. The device images are concept mock-ups, not manufacturing drawings or evidence of tested hardware. Physical MagTag operation has not been validated.
 
-The first build can use development boards with integrated screens/buttons and 3D-printed enclosures. The builder has a Bambu Lab P1S and Fusion 360. ST-1 now uses a MagTag with 3.3 V IR drive and TSSP77038 reception; other board and power choices remain open; the rendered appearance is not a procurement requirement.
+The first build can use development boards with integrated screens and buttons, plus 3D-printed enclosures. The builder has a Bambu Lab P1S and Fusion 360.
 
-## Design
+## Further reading
 
-- One to four lanes, each with its own start and finish events in Flying mode.
-- Shared countdown and GO in Standing mode, operated from ST-1's physical controls.
-- Retroreflective 940 nm IR sensing with 38 kHz modulation.
-- Dedicated lane result displays LN-1 through LN-4.
-- No subscription, rider profiles, or dependency on JNS_Timing code.
-- Cruiser bikes excluded; phone control and handheld remote deferred.
-
-Read the [build specification](docs/build-specification.md) for agreed requirements, proposals, and open choices. The [firmware overview](firmware/README.md) maps devices to targets. The [mock-up gallery](images/README.md) records the current physical design direction.
-
-## Repository layout
+- The [build specification](docs/build-specification.md) records agreed requirements, proposals and open choices.
+- The [firmware overview](firmware/README.md) maps devices to targets.
+- The [mock-up gallery](images/README.md) records the current physical design direction.
 
 | Folder | Contents |
 | --- | --- |
 | `docs/` | Build specification and design decisions |
-| `hardware/` | Future parts lists, wiring, and enclosure designs |
+| `hardware/` | Future parts lists, wiring and enclosure designs |
 | `images/` | Current device concept mock-ups |
 | `firmware/` | Five planned firmware targets and shared modules |
 
-## Timing questions still open
-
-Starting a finish timer when a radio START arrives introduces delivery-delay error. Delay and variation must be measured. Attempt identifiers prevent duplicate restarts but do not solve delayed first receipt. No timing accuracy is claimed yet.
-
-## Development baseline
-
-ST-1 uses Arduino C++ and PlatformIO on the MagTag ESP32-S2. Its README documents wiring, build/flash commands, controls and bench mode. Native tests and all three hardware builds are configured in GitHub Actions. Physical MagTag operation and timing accuracy have not been validated.
+ST-1 uses Arduino C++ and PlatformIO on the MagTag ESP32-S2. Native tests and all three hardware builds run in GitHub Actions. No dependency on JNS_Timing code. Cruiser bikes are excluded; phone control and a handheld remote are deferred.

@@ -1,6 +1,6 @@
 # ST-1 MagTag prototype
 
-Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, Standing countdown/GO, Flying lane 1 start detection, sensor readiness/conflict checks and result collection. Other device firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
+Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks and result collection. Other device firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
 
 The normal build refuses to arm without compatible sensor announcements. Use the explicitly isolated bench build to try ST-1 alone.
 
@@ -51,7 +51,7 @@ Set `JNS_SYSTEM_ID` to the same unique value across this installation and use a 
 - **MODE (A / D15):** switch Flying/Standing while inactive.
 - **LANES (B / D14):** select contiguous lanes 1 through N, N=1–4.
 - **CANCEL (C / D12):** invalidate the attempt and return to idle; takes priority over simultaneous presses.
-- **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to start a predictable three-second countdown. Flying waits for each lane's beam break.
+- **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break.
 
 Mode and lane count are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. This version uses group arm in both modes; per-lane rearm is deferred.
 
@@ -62,31 +62,32 @@ Mode and lane count are saved. Attempts never resume after reboot. Configuration
 | Dim white; lane 1 red in Flying when broken | Enabled idle lane; local beam not clear |
 | Amber | Preparing / waiting for sensor acknowledgements |
 | Green | Armed, or completed after a run |
-| Amber flashes | Standing countdown |
+| Amber, then flashing with each beep | Standing lead-in, then countdown |
 | Blue | Lane started, awaiting finish |
 | Red on enabled lanes | Invalid attempt; screen explains after cancellation repeats |
 | Off | Disabled lane |
 
-Colours describe controller state, not optical signal margin. Countdown audio is emitted only by ST-1; position it near riders. Audio-to-remote-timer alignment is uncalibrated.
+Colours describe controller state, not optical signal margin. ST-1 sounds lane 1's cue from an `esp_timer` at the scheduled instants; ST-2–ST-N are to do the same for their lanes. Onset alignment between posts is unmeasured.
 
-For a standalone test, upload `magtag_bench`, choose Standing, press ARM, wait for green, then press GO. Expect three short tones, a GO tone and blue LEDs. CANCEL resets it. For Flying, fit and align the optics, ARM and interrupt lane 1. External readiness is simulated but the local beam is real. There are no simulated results or lane 2–4 start events: cancel or let the attempt time out. The screen says BENCH and no radio packets are transmitted.
+For a standalone test, upload `magtag_bench`, choose Standing, press ARM, wait for green, then press GO. Expect a one-second pause, three short tones, a GO tone and blue LEDs. Simulated peers acknowledge the schedule. CANCEL resets it. For Flying, fit and align the optics, ARM and interrupt lane 1. External readiness is simulated but the local beam is real. There are no simulated results or lane 2–4 start events: cancel or let the attempt time out. The screen says BENCH and no radio packets are transmitted.
 
 ## Attempt handling
 
 See the [prototype wire contract](../shared/README.md) before implementing peers.
 
-- Discovery lasts at least three seconds after boot. Every enabled finish sensor must be ready; Flying also requires ST-2 through ST-N and a clear local beam.
+- Status heartbeats carry ST-1's clock in every state; they are the other units' timebase samples.
+- Discovery lasts at least three seconds after boot. Every enabled finish sensor and ST-2 through ST-N must be ready in both modes, since start posts sound the Standing cue. Flying also requires a clear local beam.
 - Duplicate role/lane claims, another controller, or an external start sensor claiming lane 1 prevent arming. Retain visual placement checks: an unheard device cannot be detected electronically.
 - ARM repeats every 250 ms during preparation. Required sensors must echo this session/attempt/mode/mask with Armed set before green. Preparation times out after three seconds; an observed start during preparation invalidates the group.
 - Required sensor status expires after three seconds. Peer reboot/identity change, new sensors during an armed run, sensor faults, queue overflow and send failures invalidate the attempt.
-- START/GO are submitted once, without application retries. Busy radio or failed submission invalidates the attempt. A successful broadcast callback does not prove application receipt. Delayed first receipt remains unresolved.
+- START carries the lane 1 event time and is resent every 100 ms until FN-1 reports Running. GO carries the scheduled GO time and is resent every 250 ms until every required unit echoes it with Cued. If any has not echoed it by the first beep, the attempt is abandoned. Send failures are retried rather than treated as faults; receive-queue overflow still invalidates the attempt.
 - Results must match an announced finish MAC/boot identity, current session/attempt, and a lane whose start this controller observed. The first result is latched. If ST-1 misses a START that its finish node receives, that lane's result is conservatively rejected.
-- The provisional group deadline is 30 seconds from ARM, including preparation/countdown. Timeout invalidates the group rather than presenting a partial set as complete.
+- The provisional group deadline is 30 seconds from ARM, including preparation and the four-second countdown. Timeout invalidates the group rather than presenting a partial set as complete.
 - CANCEL repeats for two seconds. Receivers must also expire controller status locally; delivery of cancellation is not guaranteed.
 
-Radio callbacks enqueue bounded records; the receiver interrupt captures edges; the main loop owns state. Hardware PWM generates the carrier independently. Stored event timestamps are diagnostic: clocks on different boards are not synchronised.
+Radio callbacks enqueue bounded records; the receiver interrupt captures edges; the main loop owns state. Hardware PWM generates the carrier independently. Cue tones run from an `esp_timer` callback, not the loop.
 
-Received results are rounded to three decimals. Display resolution is not timing accuracy. Radio delay/loss, sensing latency, interrupt/loop delay, audio alignment and actual hardware operation need measurement before claiming useful timing accuracy.
+Received results are rounded to three decimals. Display resolution is not timing accuracy. Clock-sync error and drift, sensing latency, interrupt capture delay, cue alignment and actual hardware operation need measurement before claiming useful timing accuracy.
 
 ## Verification and first hardware checks
 
@@ -95,7 +96,7 @@ sh tests/run.sh
 pio run -e magtag -e magtag_legacy -e magtag_bench
 ```
 
-Native tests cover wire validation, readiness, duplicate/stale events, wrong-device results, reboot/conflicts, missing peers, Standing transitions, multi-lane completion and beam qualification. GitHub Actions runs these and all three builds.
+Native tests cover wire validation, readiness, duplicate/stale events, wrong-device results, reboot/conflicts, missing peers, Standing transitions, multi-lane completion, the Standing cue schedule and its acknowledgement, START resend, and beam qualification. GitHub Actions runs these and all three builds.
 
 On the bench, check screen variant/buttons, carrier waveform/current, receiver polarity/disconnection, clear/break detection, cancel during countdown and supply stability with wireless active. Then add one finish node and compare timing against a common reference before expanding to four lanes. Hardware verification remains outstanding.
 

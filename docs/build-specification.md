@@ -1,8 +1,8 @@
 # JNS LaneTime — Build Specification
 
-**Draft for implementation · Revision 2 · 27 September 2026**
+**Draft for implementation · Revision 3 · 3 October 2026**
 
-**29 September prototype note:** The first [ST-1 firmware](../firmware/controller/README.md) selects the Adafruit MagTag (ESP32-S2), its front buttons/eInk/LEDs/speaker, D10 IR drive and A1/GPIO18 TSSP77038 reception at 3.3 V. ST-1 has TX and RX for Flying mode and no passive reflector. The controller README records provisional group arm, three-second countdown, 30-second group deadline, beam qualification and wire contract choices. These are bench defaults, not measured performance requirements. Per-lane rearm, other device firmware and timing validation remain outstanding; system-wide open choices below still apply.
+**29 September prototype note:** The first [ST-1 firmware](../firmware/controller/README.md) selects the Adafruit MagTag (ESP32-S2), its front buttons/eInk/LEDs/speaker, D10 IR drive and A1/GPIO18 TSSP77038 reception at 3.3 V. ST-1 has TX and RX for Flying mode and no passive reflector. The controller README records provisional group arm, the scheduled Standing countdown, 30-second group deadline, beam qualification and wire contract choices. These are bench defaults, not measured performance requirements. Revision 3 replaces arrival-time starts with a common ST-1 timebase (§5) and moves the Standing cue onto every start post (§5.3); ST-1 firmware and the wire contract follow it. Per-lane rearm, other device firmware and timing validation remain outstanding; system-wide open choices below still apply.
 
 ## 1. Status and scope
 
@@ -55,7 +55,7 @@ Mock-up screen artwork, battery icons, exact button geometry, materials, fastene
 
 Beam height is fixed in use and intended for 20-inch BMX wheels. **TBD:** actual beam-centre height and installation tolerance above the riding surface.
 
-Standing mode does not require start-line sensing. A controller and suitable audible cues must still be positioned near the riders; a minimum Standing-only equipment package is TBD.
+Standing mode does not use start-line beam sensing, but the start posts ST-1 to ST-N stand beside the riders to sound the countdown (§5.3). **Proposed Standing package:** ST-1, ST-2–ST-N, FN-1–FN-N, the finish-line end-cap and the result displays. The start-line end-cap is not needed.
 
 ## 3. Optical subsystem
 
@@ -86,6 +86,8 @@ Use the shielded aperture concept, but verify that the completed aperture permit
 
 Use the first qualified front-wheel interruption as the timing event. Match start and finish height and geometry. Subsequent wheel, frame, body, and rear-wheel interruptions cannot start or finish the same attempt again.
 
+Retroreflective strips on clothing, helmets or bikes may return enough IR to hold the beam present while a rider passes. Test with typical club kit before relying on the event definition.
+
 Require a qualified clear beam before rearming. Exact filter times must follow measurements of the selected receiver; do not select them solely for convenient firmware delays.
 
 ## 4. Controller, configuration, and interfaces
@@ -94,7 +96,7 @@ Require a qualified clear beam before rearming. Exact filter times must follow m
 
 ST-1 has the controller role by design. Remove the controller-enable switch requirement from ordinary sensors and the spare. Exactly one ST-1 controls a deployed set.
 
-Ordinary sensors retain their assigned lane and start/finish identity in routine use. **TBD:** how those identities are commissioned. Internal switches remain an option; the mock-ups do not establish a new configuration method for ordinary units. If switches are used, read them at boot and require a restart after changes.
+**Specified:** ordinary sensors have their lane and START/FINISH role fixed at build time, compiled into the firmware image for that unit. There is no per-post configuration step in routine use. A unit that changes role is reflashed. The spare is the only field-configurable sensor.
 
 Lane result displays retain the previously specified lane switch, read at boot; changes require a restart.
 
@@ -104,7 +106,7 @@ Each powered sensor also needs a distinct device identity for electronic conflic
 
 **ST-1 — Specified:** physical buttons provide setup and operation. **Proposed layout shown in the mock-up:** POWER, MODE, SELECT, RESET, and START. Exact button behaviour, lane-selection navigation, and arming interaction remain TBD. ST-1 performs controller duties and lane 1 start sensing in Flying mode.
 
-**Ordinary sensors — Specified:** one power button, lane/role identification, alignment indication, and the existing piezo provision. No coach setup-button row or elapsed-time readout is required on these units.
+**Ordinary sensors — Specified:** one power button, lane/role identification, alignment indication, and a piezo. Start posts use the piezo for the scheduled Standing cue, so use the same piezo part and drive on every start post to keep onset behaviour matched. No coach setup-button row or elapsed-time readout is required on these units.
 
 **Spare — Specified:** controls select the lane being replaced and its START/FINISH role; the display shows that assignment. It does not become ST-1. **Proposed interaction:** minus/plus select the lane and SET confirms; holding SET enters configuration or role selection. Exact interaction remains TBD. Configuration locking while armed and retaining the confirmed assignment across power cycles are proposed requirements. Do not silently change identity during a run.
 
@@ -135,37 +137,41 @@ Board selection must account for peripheral conflicts and usable pins before pin
 
 ## 5. Firmware timing behaviour
 
-### 5.1 Flying — Specified architecture
+### 5.1 Common timebase — Proposed architecture, adopted in ST-1 firmware
+
+ST-1's free-running microsecond clock is the system timebase. Every result is the difference of two timestamps expressed in that timebase. No unit starts or stops a clock because a packet arrived.
+
+1. ST-1 broadcasts Status every 500 ms in every state. The packet carries ST-1's clock, read as late as possible before submission.
+2. Every other unit timestamps each heartbeat in its receive callback. It keeps the minimum of (local time − ST-1 time) over a sliding window. The minimum rejects queuing and channel-access delay, leaving the true offset plus the minimum one-way delay.
+3. Each unit fits drift across recent minima, because crystal frequencies differ by tens of ppm. It converts between local and ST-1 time with offset and drift.
+4. Events are captured locally, in an interrupt, on the local clock. They are converted to ST-1 time before transmission.
+
+The minimum one-way delay appears in every unit's offset estimate. It therefore largely cancels when a finish timestamp from one unit is subtracted from a start timestamp from another.
+
+Remaining error sources are sensing latency, interrupt capture latency, offset-estimate error and residual drift. They are **expected to be small, not measured for this build**, and must be measured before making an accuracy claim (§9). **TBD:** window length, drift-fit method, and the maximum sample age a unit may rely on before reporting not Ready.
+
+### 5.2 Flying
 
 1. Arm the lane.
-2. ST-x detects the qualified start event and sends START for the current attempt.
-3. FN-x starts its local monotonic timer when START is accepted.
-4. FN-x captures its finish event and computes elapsed time on that same clock.
-5. FN-x sends the result to its lane display and latches completion.
+2. ST-x captures the qualified start event and sends START carrying the event time in ST-1 time.
+3. FN-x latches that start time for the attempt and reports Running in its Status.
+4. FN-x captures its finish event, converts it to ST-1 time, computes elapsed time, sends the result to its display and latches completion.
 
-Approximately:
+Because START carries a timestamp, delivery delay does not shorten the result. A START that arrives late, or after a retry, still carries the correct start time. The start unit therefore resends START until the matching finish unit reports Running, and a send failure is not a timing fault. A finish beam event captured before START is received is held with its timestamp. It becomes a result only if START for the same attempt arrives within the attempt deadline and precedes it in ST-1 time.
 
-`reported interval = physical interval − start delivery delay + other sensing/timing errors`
+Every START must identify its attempt. FN-x accepts the first START for an attempt; duplicates carry the same timestamp and change nothing. Messages for completed, cancelled or superseded attempts must not reopen them.
 
-The delay includes sensing, firmware handling, radio delivery, and receiver processing. Its magnitude and variation are **assumed acceptable, not measured for this build**. They must be measured before making an accuracy claim.
+Keep display updates, sound generation and logging out of time-critical capture.
 
-Capture events close to their source; keep display updates, sound generation, and logging out of time-critical handling. **TBD:** timer peripheral/API, capture point, timer resolution, and overflow handling.
+### 5.3 Standing — scheduled cues
 
-### 5.2 Attempt identity and late delivery
+On the coach's GO press, ST-1 fixes a GO time in its own clock: one second of lead-in, then three beeps one second apart, then GO. It broadcasts GO carrying that time, and repeats it until every required unit acknowledges.
 
-Every START must identify its attempt. FN-x starts at most once for that attempt. Duplicate messages must never reset a running clock. Messages for completed, cancelled, or superseded attempts must not reopen them.
+- **Start posts (ST-1 to ST-N)** convert the beep and GO times to their local clocks. They sound them from a hardware timer, independent of the main loop. Each rider hears the post beside them, which removes the speed-of-sound offset of a single central cue (roughly 3 ms per metre).
+- **Finish posts** take GO as their start time in ST-1 time.
+- **Acknowledgement:** each required unit echoes the GO time in its Status with the Cued flag. If any required unit has not echoed it by the first beep, ST-1 abandons the attempt. A missed packet costs a rerun, not a silent lane or an unfair start.
 
-This prevents duplicate restarts. It does not solve delayed first receipt: if the first packet is lost and a later copy is accepted, timing still starts late and produces a short result.
-
-**Unresolved implementation constraint:** define how late timing events are detected/rejected, or revise the timing architecture if measured radio behaviour is unsuitable. An attempt identifier alone cannot establish packet age. Do not present retransmission as a timing-accuracy solution.
-
-### 5.3 Standing
-
-The controller issues a predictable countdown and GO. Enabled finish units start their clocks when accepting GO and stop on their own qualified beam events. Apply the same duplicate-event and attempt rules as Flying mode. Delayed first receipt of GO carries the same timing risk.
-
-No automatic early-start detection is provided. Valid standing-start comparisons depend on the coach rejecting obvious jumps.
-
-Use piezo buzzers for the audible cue. **TBD:** which powered units sound, their placement, and how timer starts align with what each rider hears. Passive end-caps cannot sound. Sound from the finish line must not be assumed equivalent to a cue beside the rider.
+The cue sequence and lead-in are provisional bench values. No automatic early-start detection is provided; valid standing-start comparisons depend on the coach rejecting obvious jumps. **TBD:** cue tones, durations and volume, and measured onset alignment between posts.
 
 ## 6. Radio and configuration checks
 
@@ -175,10 +181,11 @@ Assigned lane and role provide logical identity; firmware still needs an address
 
 Only the following information flows are needed to describe the implementation at this stage:
 
-- Controller to participating units: arm/reset, countdown, and GO.
-- Start sensor to matching finish sensor: START.
+- Controller to all units: Status heartbeats carrying the ST-1 timebase.
+- Controller to participating units: arm/reset, and the scheduled GO time.
+- Start sensor to matching finish sensor: START carrying the event time in ST-1 time, resent until acknowledged.
 - Finish sensor to matching display: result/status.
-- Sensors to controller: role announcements and readiness/fault information.
+- Sensors to controller: role announcements, readiness/fault information, Running, and Cued acknowledgement of the GO time.
 
 Role announcements are **Proposed new behaviour**. Use unique device identity plus configured role to detect two sensors claiming the same lane-and-line or multiple ST-1 controllers in the same set. Refuse arming when a conflict is detected and show a fault. Define the announcement/check interval and late-joining-unit behaviour during implementation; a single missed announcement cannot prove that a conflict is absent.
 
@@ -198,7 +205,7 @@ One outstanding rider per lane. Different lanes may operate independently in Fly
 | Complete | Result is latched; later beam events and duplicate starts are ignored |
 | Invalid/DNF | No valid numerical result; rearm is required |
 
-A new arm establishes a new attempt. Reset/cancel invalidates the affected attempt. Reboot during an attempt must not silently resume timing. Finish before accepted start cannot produce a valid result.
+A new arm establishes a new attempt. Reset/cancel invalidates the affected attempt. Reboot during an attempt must not silently resume timing. A finish earlier than the attempt's start time cannot produce a valid result.
 
 **Proposed:** per-lane rearm in Flying mode; shared group arm in Standing mode. Global reset cancels every active lane. **TBD:** DNF timeout, attempt numbering, enabled-lane controls, and rearm user interface.
 
@@ -218,6 +225,8 @@ Display one raw elapsed time per lane, with optional alternation between complet
 
 Displays originate no application messages. The controller therefore cannot confirm they received a reset or result. One broadcast cannot guarantee that all displays clear immediately; repetition and a local timeout are proposed to bound stale output.
 
+**Prototype options:** the Neo7 Mini figure-8 digit modules shown in the gallery, or cheaper off-the-shelf flexible WS2812B matrix panels; the choice is open. For early testing, the builder's existing 8×8 RGB matrices may stand in for the result displays.
+
 **TBD:** display size, sunlight visibility, numerical resolution, rounding, symbols, alternation period, and stale timeout. Display resolution must not be confused with timing accuracy.
 
 ## 9. Build decisions and practical checks
@@ -228,9 +237,9 @@ Resolve decisions when needed for the affected build step rather than inventing 
 | --- | --- | --- |
 | Optical bench circuit | Emitter, receiver, reflector, driver, modulation envelope | Stable return, interruption response, ambient-light performance, margin indication |
 | Controller and sensor boards | MCU, pin allocation, power, identity configuration, indicators, role-specific controls | Interfaces work together; configuration and spare assignment read correctly |
-| One timing lane | Attempt handling, timer capture, radio routing, basic output | Measure error against a common reference; inject duplicates and delayed/lost START |
+| One timing lane | Attempt handling, timer capture, clock sync, radio routing, basic output | Measure sync offset error and drift; measure timing error against a common reference; inject duplicates, delayed and lost START |
 | Multi-lane operation | Conflict detection, lane controls, independent attempt behaviour | Concurrent starts, correct lane routing, duplicate roles, optical interaction |
-| Standing operation | Cue locations, countdown behaviour | Cue-to-timer alignment and missed/delayed GO behaviour |
+| Standing operation | Start-post cue scheduling | Onset alignment between posts' cues; cue-to-timer alignment; missed GO acknowledgement aborts before the first beep |
 
 Before claiming useful timing accuracy, choose an acceptable error and repeatability target for coaching and compare measured results against it. Before producing a schematic/BOM, resolve the component and power choices listed above.
 
@@ -238,8 +247,12 @@ Before claiming useful timing accuracy, choose an acceptable error and repeatabi
 
 JNS_Timing contributes prior optical test evidence, not a code dependency. The existing Swift G4 aperture and SKLZ identification references are design references. Do not incorporate the previously identified noncommercial Pinewood Derby source into this commercial build under this specification.
 
-This draft intentionally leaves wire encoding, pin numbers, and component values open where hardware choices have not been supplied. It defines what those choices must support so the next revision can become a concrete schematic, BOM, and firmware implementation without silently inventing requirements.
+This draft intentionally leaves pin numbers and component values open where hardware choices have not been supplied. It defines what those choices must support so the next revision can become a concrete schematic, BOM, and firmware implementation without silently inventing requirements.
 
 ## Revision 2 note
 
 Updated the unit taxonomy, quantities, configuration, and interface requirements to match the agreed mock-ups: dedicated ST-1, simple intermediate sensors, reflector-free FN-1, slim passive end-caps, and a button-configurable spare. Deferred phone/remote interfaces and replacement details remain deferred. Illustrative controls and screen details are distinguished from agreed functions. Optical specifications, prior test evidence, and the unresolved timing-delivery issues are unchanged.
+
+## Revision 3 note
+
+Replaced arrival-time starts with a common ST-1 timebase. Heartbeats carry ST-1's clock; START and GO carry timestamps; delivery delay and retries no longer affect results. This resolves the Revision 2 late-delivery constraint, subject to measurement. Standing cues are now scheduled and sounded by every start post, so ST-2–ST-N are required in Standing. Fixed build-time identity replaces the open commissioning question for ordinary sensors. Added a retroreflective-kit test and the display prototyping options. The wire contract moves to version 2.

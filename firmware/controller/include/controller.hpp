@@ -6,6 +6,9 @@
 namespace jns {
 enum class State { Idle, Preparing, Armed, Countdown, Running, Complete, Fault };
 constexpr uint64_t kPeerUs=3000000, kAttemptUs=30000000;
+// Standing cue schedule: lead-in for radio delivery, then three beeps 1 s apart and GO.
+constexpr uint64_t kCueLeadUs=1000000, kCueStepUs=1000000;
+constexpr uint8_t kCueBeeps=3;
 struct Peer {
   bool used=false;
   uint8_t mac[6]={};
@@ -19,16 +22,17 @@ class Controller {
   Mode mode=Mode::Flying;
   uint8_t lanes=1, started=0, finished=0;
   uint32_t attempt=0;
-  uint64_t results[4]={}, since=0, countdownAt=0;
+  uint64_t results[4]={}, since=0, goAt=0, startAt=0;
   const char* reason="Ready to configure";
   uint8_t mask() const { return uint8_t((1U<<lanes)-1); }
   bool active() const {
     return state==State::Preparing || state==State::Armed || state==State::Countdown || state==State::Running;
   }
-  void cancel() { state=State::Idle; started=finished=0; reason="Cancelled / idle"; }
+  void cancel() { state=State::Idle; started=finished=0; goAt=startAt=0; reason="Cancelled / idle"; }
   void fail(const char* why) { state=State::Fault; reason=why; }
   bool relevant(const Packet& p) const {
-    return p.lane<=lanes && (p.role==Role::Finish || (mode==Mode::Flying && p.role==Role::Start));
+    // Start sensors carry the countdown cues in Standing, so they are required in both modes.
+    return p.lane<=lanes && (p.role==Role::Finish || p.role==Role::Start);
   }
   bool conflict(uint64_t now) const {
     for (const auto& a:peers_) {
@@ -43,9 +47,8 @@ class Controller {
     if (conflict(now)) return "Duplicate role / controller";
     if (mode==Mode::Flying && !(started&1) && !clear) return "Lane 1 beam not clear";
     for (uint8_t lane=1;lane<=lanes;++lane) for (Role role:{Role::Start,Role::Finish}) {
-      if (role==Role::Start && (lane==1 || mode==Mode::Standing)) continue;
-      const Peer* found=nullptr;
-      for (const auto& x:peers_) if (x.used && now-x.seen<=kPeerUs && x.packet.role==role && x.packet.lane==lane) found=&x;
+      if (role==Role::Start && lane==1) continue;
+      const Peer* found=find(now,role,lane);
       if (!found) return "Waiting for sensor status";
       const auto& p=found->packet;
       if (p.flags&jns::Fault) return "Sensor reports fault";
@@ -55,13 +58,31 @@ class Controller {
     }
     return nullptr;
   }
+  // Every required peer holds this attempt's GO time.
+  bool cued(uint64_t now) const {
+    for (uint8_t lane=1;lane<=lanes;++lane) for (Role role:{Role::Start,Role::Finish}) {
+      if (role==Role::Start && lane==1) continue;
+      const Peer* x=find(now,role,lane);
+      if (!x || x->packet.session!=session_ || x->packet.attempt!=attempt ||
+          !(x->packet.flags&jns::Cued) || x->packet.value!=goAt) return false;
+    }
+    return true;
+  }
+  uint64_t firstCue() const { return goAt-kCueBeeps*kCueStepUs; }
+  // FN-1 has accepted ST-1's START; until then ST-1 keeps resending it.
+  bool startPending(uint64_t now) const {
+    if (mode!=Mode::Flying || !(started&1) || state!=State::Running) return false;
+    const Peer* x=find(now,Role::Finish,1);
+    return !x || x->packet.session!=session_ || x->packet.attempt!=attempt ||
+      !(x->packet.flags&(jns::Running|jns::Complete));
+  }
   bool arm(uint64_t now,bool clear) {
     if (active()) return false;
     started=finished=0;
     if (now<kPeerUs) { reason="Discovering sensors"; return false; }
     if (const char* why=readiness(now,clear,false)) { reason=why; return false; }
     if (attempt==UINT32_MAX) { fail("Attempt exhausted - reboot"); return false; }
-    ++attempt; memset(results,0,sizeof(results)); since=now;
+    ++attempt; memset(results,0,sizeof(results)); since=now; goAt=startAt=0;
     state=State::Preparing; reason="Preparing sensors"; return true;
   }
   bool observe(const uint8_t* mac,const Packet& p,uint64_t now) {
@@ -110,21 +131,29 @@ class Controller {
     }
     // After arming, local beam changes are events rather than readiness failures.
     if (const char* why=readiness(now,true,true)) { fail(why); return; }
-    if (now-since>kAttemptUs) fail("Attempt timeout / DNF");
+    if (now-since>kAttemptUs) { fail("Attempt timeout / DNF"); return; }
+    if (state==State::Countdown) {
+      if (now>=firstCue() && !cued(now)) { fail("Cue schedule not acknowledged"); return; }
+      if (now>=goAt) { started=mask(); state=State::Running; reason="GO - running"; }
+    }
   }
+  // Fix the GO time in ST-1's clock. Cues sound at GO-3 s, GO-2 s, GO-1 s and GO on every
+  // start unit; finish units start their clocks at GO. Packet arrival time is irrelevant.
   bool countdown(uint64_t now) {
     if (state!=State::Armed || mode!=Mode::Standing) return false;
-    state=State::Countdown; countdownAt=now; reason="Countdown"; return true;
+    goAt=now+kCueLeadUs+kCueBeeps*kCueStepUs;
+    state=State::Countdown; reason="Countdown"; return true;
   }
-  bool go(uint64_t now) {
-    if (state!=State::Countdown || now-countdownAt<3000000) return false;
-    started=mask(); state=State::Running; reason="GO - running"; return true;
-  }
-  bool localStart() {
+  bool localStart(uint64_t at) {
     if (mode!=Mode::Flying || (state!=State::Armed && state!=State::Running) || (started&1)) return false;
-    started|=1; state=State::Running; reason="Flying - running"; return true;
+    started|=1; startAt=at; state=State::Running; reason="Flying - running"; return true;
   }
  private:
+  const Peer* find(uint64_t now,Role role,uint8_t lane) const {
+    const Peer* found=nullptr;
+    for (const auto& x:peers_) if (x.used && now-x.seen<=kPeerUs && x.packet.role==role && x.packet.lane==lane) found=&x;
+    return found;
+  }
   uint32_t system_;
   uint64_t session_;
   Peer peers_[12];

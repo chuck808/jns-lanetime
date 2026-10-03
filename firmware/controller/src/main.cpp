@@ -33,10 +33,9 @@ Preferences preferences;
 Controller* controller=nullptr;
 Beam beam;
 uint64_t sessionId=0, lastHeartbeat=0, lastArmSend=0, lastPaint=0, toneUntil=0;
-uint64_t lastPixels=0, cancelUntil=0, lastCancel=0;
+uint64_t lastPixels=0, cancelUntil=0, lastCancel=0, lastGoSend=0, lastStartSend=0;
 uint32_t bootId=0;
 bool dirty=true, radioReady=false, fatalHardware=false;
-int lastCount=-1;
 struct Received { uint8_t mac[6]; uint8_t data[kPacketSize]; uint64_t at; };
 struct Edge { bool broken; uint64_t at; };
 QueueHandle_t radioQueue=nullptr, edgeQueue=nullptr;
@@ -86,14 +85,46 @@ bool transmit(Kind kind,uint64_t value=0) {
   const bool busy=radioBusy;
   if (!busy) radioBusy=true;
   portEXIT_CRITICAL(&radioLock);
-  if (busy) return false; // Never queue a timing event for a later retry.
+  if (busy) return false; // Callers retry; timing values are timestamps, not arrival times.
   auto p=packet(kind); p.value=value;
+  if (kind==Kind::Status) p.value=nowUs(); // Common timebase sample for every peer.
   uint8_t bytes[kPacketSize]; encode(p,bytes);
   if (esp_now_send(broadcastMac,bytes,sizeof(bytes))!=ESP_OK) {
     portENTER_CRITICAL(&radioLock); radioBusy=false; portEXIT_CRITICAL(&radioLock);
     return false;
   }
   return true;
+}
+// Countdown cues run from an esp_timer at scheduled ST-1 instants, independent of the
+// main loop. ST-2..N do the same after converting GO to their own clocks.
+struct Cue { uint64_t at; uint16_t hz; };
+Cue cues[2*(kCueBeeps+1)];
+uint8_t cueCount=0;
+volatile uint8_t cueNext=0;
+esp_timer_handle_t cueTimer=nullptr;
+void armCue() {
+  const int64_t wait=int64_t(cues[cueNext].at)-esp_timer_get_time();
+  esp_timer_start_once(cueTimer,wait>0?uint64_t(wait):0);
+}
+void cueFire(void*) {
+  const Cue& c=cues[cueNext];
+  if (c.hz) { digitalWrite(speakerEnable,HIGH); ledcWriteTone(soundChannel,c.hz); }
+  else { ledcWrite(soundChannel,0); digitalWrite(speakerEnable,LOW); }
+  if (++cueNext<cueCount) armCue();
+}
+void stopCues() {
+  if (cueTimer) esp_timer_stop(cueTimer);
+  cueCount=cueNext=0; ledcWrite(soundChannel,0); digitalWrite(speakerEnable,LOW);
+}
+void scheduleCues(uint64_t goAt) {
+  if (!cueTimer) return;
+  stopCues(); uint8_t n=0;
+  for (uint8_t i=kCueBeeps;i>0;--i) {
+    const uint64_t at=goAt-i*kCueStepUs;
+    cues[n++]={at,1000}; cues[n++]={at+120000,0};
+  }
+  cues[n++]={goAt,2000}; cues[n++]={goAt+400000,0};
+  cueCount=n; cueNext=0; armCue();
 }
 void beep(uint16_t hz,uint32_t durationMs) {
   digitalWrite(speakerEnable,HIGH); ledcWriteTone(soundChannel,hz);
@@ -147,9 +178,10 @@ struct Button {
 void benchPeers(uint64_t now) {
   if (!JNS_BENCH) return;
   for (uint8_t lane=1;lane<=controller->lanes;++lane) for (Role role:{Role::Start,Role::Finish}) {
-    if (role==Role::Start && (lane==1 || controller->mode==Mode::Standing)) continue;
+    if (role==Role::Start && lane==1) continue;
     auto p=packet(Kind::Status); p.role=role; p.lane=lane; p.boot=100+lane+10*uint8_t(role);
     p.flags=jns::Ready | (controller->active()?jns::Armed:0);
+    if (controller->goAt) { p.flags|=jns::Cued; p.value=controller->goAt; }
     uint8_t mac[]={2,0,0,0,uint8_t(role),lane}; controller->observe(mac,p,now);
   }
 }
@@ -183,6 +215,8 @@ void setup() {
   const double irHz=ledcSetup(irChannel,38000,8);
   ledcAttachPin(txPin,irChannel); ledcWrite(irChannel,0);
   ledcSetup(soundChannel,2000,8); ledcAttachPin(speakerPin,soundChannel);
+  const esp_timer_create_args_t cueArgs={cueFire,nullptr,ESP_TIMER_TASK,"cues",false};
+  if (esp_timer_create(&cueArgs,&cueTimer)!=ESP_OK) { controller->fail("Cue timer setup failed"); fatalHardware=true; }
   if (irHz<37500 || irHz>38500) { controller->fail("IR PWM setup failed"); fatalHardware=true; }
   SPI.begin(36,37,35,8); display.begin(THINKINK_MONO); display.setRotation(0);
   beam.edge(digitalRead(rxPin)!=LOW,nowUs());
@@ -215,11 +249,12 @@ void loop() {
   uint64_t eventAt;
   if (beam.take(eventAt) && eventAt>=controller->since && controller->mode==Mode::Flying) {
     if (controller->state==State::Preparing) controller->fail("Beam broke while preparing");
-    else if (controller->localStart() && !transmit(Kind::Start,eventAt)) controller->fail("START could not be sent");
+    else if (controller->localStart(eventAt) && transmit(Kind::Start,eventAt)) lastStartSend=nowUs();
   }
   benchPeers(now); controller->tick(now,beam.clear(now));
   portENTER_CRITICAL(&radioLock);
-  bool radioError=sendFailed || overflow; sendFailed=false; overflow=false;
+  // Send failures are retried by the callers below; lost received packets are not recoverable.
+  bool radioError=overflow; sendFailed=false; overflow=false;
   portEXIT_CRITICAL(&radioLock);
   if (radioError && controller->active()) controller->fail("Radio queue / send fault");
   bool pressed[4]; for (int i=0;i<4;++i) pressed[i]=button[i].pressed(buttons[i],now);
@@ -237,7 +272,7 @@ void loop() {
     }
     if (pressed[3]) {
       if (controller->state==State::Armed && controller->mode==Mode::Standing) {
-        if (controller->countdown(now)) lastCount=-1;
+        if (controller->countdown(now)) { stopCues(); lastGoSend=0; if (transmit(Kind::Go,controller->goAt)) lastGoSend=nowUs(); }
       } else if (!controller->active()) {
         // No eInk refresh here: it would age readiness observations before ARM.
         now=nowUs(); benchPeers(now);
@@ -251,24 +286,21 @@ void loop() {
     if (transmit(Kind::Arm)) lastArmSend=now;
   }
   if (controller->state==State::Countdown) {
-    int count=int((now-controller->countdownAt)/1000000);
-    if (count>lastCount+1 || (count!=lastCount && (now-controller->countdownAt)%1000000>100000)) {
-      controller->fail("Countdown scheduling overrun");
-    } else if (count<3 && count!=lastCount) { beep(1000,120); lastCount=count; }
-    else if (count>=3 && controller->go(now)) {
-      if (transmit(Kind::Go,now)) beep(2000,400);
-      else controller->fail("GO could not be sent");
-    }
+    // Repeat the schedule until every required unit echoes it; tick() aborts at the first cue otherwise.
+    if (!controller->cued(now) && now-lastGoSend>=250000 && transmit(Kind::Go,controller->goAt)) lastGoSend=now;
+    if (!cueCount && controller->cued(now)) scheduleCues(controller->goAt);
   }
+  if (controller->startPending(now) && now-lastStartSend>=100000 && transmit(Kind::Start,controller->startAt)) lastStartSend=now;
   if (controller->state!=before) {
     dirty=true;
+    // Silence immediately on cancel/fault; a completed GO tone is left to finish.
+    if (controller->state==State::Idle || controller->state==State::Fault) stopCues();
     if (controller->state==State::Fault) { cancelUntil=now+2000000; transmit(Kind::Cancel); beep(400,350); }
     if (Serial.availableForWrite()>80) Serial.printf("%s attempt=%lu: %s\n",stateName(controller->state),(unsigned long)controller->attempt,controller->reason);
   }
   if (now<cancelUntil && now-lastCancel>=250000) { if (transmit(Kind::Cancel)) lastCancel=now; }
-  // Keep routine radio submissions away from the GO boundary.
-  if (controller->state!=State::Preparing && now-lastHeartbeat>=500000 &&
-      (controller->state!=State::Countdown || (now-controller->countdownAt)%1000000<50000)) {
+  // Heartbeats continue in every state: they are the peers' clock-sync samples.
+  if (now-lastHeartbeat>=500000) {
     if (transmit(Kind::Status)) lastHeartbeat=now;
   }
   if (now-lastPixels>=50000) {
@@ -278,7 +310,7 @@ void loop() {
         case State::Fault: color=pixels.Color(255,0,0); break;
         case State::Preparing: color=pixels.Color(120,40,0); break;
         case State::Armed: color=pixels.Color(0,180,0); break;
-        case State::Countdown: color=((now-controller->countdownAt)%1000000<200000)?pixels.Color(180,80,0):0; break;
+        case State::Countdown: color=(now>=controller->firstCue() && (now-controller->firstCue())%kCueStepUs<200000)?pixels.Color(180,80,0):pixels.Color(120,40,0); break;
         case State::Running: color=(controller->finished&(1<<i))?pixels.Color(0,120,0):
             (controller->started&(1<<i))?pixels.Color(0,0,180):pixels.Color(0,180,0); break;
         case State::Complete: color=pixels.Color(0,120,0); break;
