@@ -15,5 +15,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install platformio==6.2.0
+      - run: sh firmware/shared/tests/run.sh
       - run: sh firmware/controller/tests/run.sh
       - run: pio run -d firmware/controller -e magtag -e magtag_legacy -e magtag_bench
