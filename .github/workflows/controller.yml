@@ -1,9 +1,9 @@
 name: ST-1 firmware
 on:
   push:
-    paths: ['firmware/controller/**', 'firmware/shared/**', '.github/workflows/controller.yml']
+    paths: ['firmware/controller/**', 'firmware/shared/**', 'firmware/bench-sync/**', '.github/workflows/controller.yml']
   pull_request:
-    paths: ['firmware/controller/**', 'firmware/shared/**', '.github/workflows/controller.yml']
+    paths: ['firmware/controller/**', 'firmware/shared/**', 'firmware/bench-sync/**', '.github/workflows/controller.yml']
 permissions:
   contents: read
 jobs:
@@ -18,3 +18,4 @@ jobs:
       - run: sh firmware/shared/tests/run.sh
       - run: sh firmware/controller/tests/run.sh
       - run: pio run -d firmware/controller -e magtag -e magtag_legacy -e magtag_bench
+      - run: pio run -d firmware/bench-sync -e heartbeat -e unit

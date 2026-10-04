@@ -154,7 +154,7 @@ The minimum one-way delay appears in every unit's offset estimate, so it largely
 
 The method lives once in `firmware/shared/include/lanetime/timebase.hpp` as pure logic with no Arduino dependency, unit-tested natively with simulated jitter, drift and loss. Start sensors, finish sensors and lane displays all use it. In simulation, two units with different drifts on a deliberately harsh link (half of heartbeats delayed by up to 5 ms) agree on a common event to within about 22 µs; this is a simulation result, not a hardware measurement.
 
-Remaining error sources are sensing latency, interrupt capture latency, offset-estimate error and residual drift. They are **expected to be tens of microseconds, not measured for this build** (100 µs is about 1.5 mm at sprint speed). **Proof before optics (§9):** drive one GPIO edge into two non-ST-1 units; each timestamps it, converts it to ST-1 time and logs it. The difference is the sync error, measured directly. **TBD:** final residual threshold and readiness figures, from that test.
+Remaining error sources are sensing latency, interrupt capture latency, offset-estimate error and residual drift. They are **expected to be tens of microseconds, not measured for this build** (100 µs is about 1.5 mm at sprint speed). **Proof before optics (§9), implemented in `firmware/bench-sync/`:** drive one GPIO edge into two non-ST-1 units; each timestamps it, converts it to ST-1 time and logs it. The difference is the sync error, measured directly. **TBD:** final residual threshold and readiness figures, from that test.
 
 ### 5.2 Flying
 
