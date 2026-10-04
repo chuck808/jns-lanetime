@@ -8,7 +8,7 @@ ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-en
 | --- | --- | --- |
 | 0 | 4 | ASCII `JNSL` |
 | 4 | 1 | Version = 2 (v1 is rejected) |
-| 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6 |
+| 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7 (specified; not yet in `protocol.hpp`) |
 | 6 | 1 | Sender role: Controller=1, Start=2, Finish=3 |
 | 7 | 1 | Sender lane 1–4; controller always lane 1 |
 | 8 | 4 | System ID |
@@ -17,7 +17,7 @@ ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-en
 | 24 | 1 | Mode: Flying=0, Standing=1 |
 | 25 | 1 | Enabled-lane mask, bits 0–3 |
 | 26 | 1 | Flags: Ready=1, Armed=2, Running=4, Complete=8, Fault=16, Cued=32 |
-| 27 | 1 | Reserved, zero |
+| 27 | 1 | Reveal: finished-lane mask, bits 0–3; otherwise reserved, zero |
 | 28 | 8 | See *Value field* below |
 | 36 | 4 | Sender boot token, random nonzero per boot |
 
@@ -31,6 +31,7 @@ ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-en
 | Go | Scheduled GO time in ST-1 time; beeps fall at GO−3 s, GO−2 s and GO−1 s |
 | Start | Qualified beam event time, converted to ST-1 time by the sender |
 | Result | Elapsed microseconds, computed from start and finish in ST-1 time |
+| Reveal | Scheduled reveal time in ST-1 time |
 | Arm, Cancel | Zero |
 
 Identity is ESP-NOW source MAC plus announced role/lane and boot token. The system ID is an accidental-mixing filter, not authentication. Reject invalid encodings, other systems, unknown versions, unexpected roles and stale sessions/attempts.
@@ -48,6 +49,8 @@ Riders wait for green at ST-1. ARM is broadcast while acknowledgements are colle
 On GO, every required start and finish unit stores the GO time and echoes it in Status with Cued set. Start units convert the beep and GO times to their local clocks and sound them from a hardware timer. ST-1 abandons the attempt if any required unit has not echoed the correct GO time by the first beep. Finish units in Flying set Running once START is latched; start units resend START every 100 ms until the matching finish unit shows Running or Complete.
 
 Result comes from the matching finish sensor, with its own role/lane/boot token, the adopted controller session/attempt/mode/mask, Complete flag and elapsed microseconds computed in ST-1 time. Repeating an immutable Result is allowed; the controller accepts the first. Receive-only lane displays filter by lane/session/attempt and clear stale output; they do not announce themselves.
+
+ST-1 sends Reveal once it holds every enabled lane's Result, or when the coach presses reveal now. It repeats Reveal until the reveal time, about 1 s after the first copy. Each display holds its own lane's Result and shows it at the reveal time, converted through its timebase, not on receipt. A lane whose bit is clear in the finished-lane mask shows DNF. Displays show only their own lane's time.
 
 CANCEL is terminal for the matching session/attempt regardless of subsequent configuration changes. Controller Fault status must also invalidate matching attempts/results. Expire control status locally after a provisional three seconds so lost cancellation cannot leave a sensor armed indefinitely. ST-1 sends Status every 500 ms in every state; required sensor status likewise expires after three seconds at ST-1. The group deadline is 30 seconds from ARM. Controller Preparing is represented by ARM packets, without Armed in controller Status.
 

@@ -53,7 +53,7 @@ Set `JNS_SYSTEM_ID` to the same unique value across this installation and use a 
 - **CANCEL (C / D12):** invalidate the attempt and return to idle; takes priority over simultaneous presses.
 - **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break.
 
-Mode and lane count are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. This version uses group arm in both modes; per-lane rearm is deferred.
+Mode and lane count are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. Group arm applies in both modes; the simultaneous reveal (specification §7, §8.1) supersedes per-lane rearm. Reveal and reveal now are specified but not yet implemented here.
 
 **The eInk screen is for setup/results; it retains its previous image while an attempt is active. Use the LEDs for live state.** Inactive refreshes may briefly delay button response. There are no eInk refreshes while preparing, armed, counting down or running.
 

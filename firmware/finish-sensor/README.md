@@ -1,7 +1,7 @@
 # Finish sensor
 
-FN-1 through FN-4, with lane and role fixed at build time. FN-1 uses this target despite having no reflector.
+FN-1 through FN-4, one target with the lane fixed by build environment. FN-1 uses this target despite having no reflector.
 
-Track ST-1's timebase from its heartbeats. Latch the attempt's start time from START (Flying) or GO (Standing), and report Running. Capture the finish beam event locally, convert it to ST-1 time and publish the elapsed time to the lane display and ST-1. A finish captured before START arrives is held, and becomes a result only if START for the same attempt arrives within the deadline and precedes it. Ignore duplicate starts and old attempts.
+Track ST-1's timebase (specification §5.1). After ARM and a qualified clear, record every qualified break in a small ring buffer. Latch the start time from START (Flying) or GO (Standing) and report Running. The finish is the first recorded break later than the start time. Convert it by interpolation once the next block minimum exists, compute elapsed time, and publish the Result every 500 ms until the next ARM or a cancel. Never resume after a reboot.
 
-Implementation has not started. See [build specification](../../docs/build-specification.md) §5 and the [wire contract](../shared/README.md).
+Behaviour and state machine: [build specification](../../docs/build-specification.md) §5.4. Implementation has not started.
