@@ -51,7 +51,7 @@ Set `JNS_SYSTEM_ID` to the same unique value across this installation and use a 
 - **MODE (A / D15):** switch Flying/Standing while inactive.
 - **LANES (B / D14):** select contiguous lanes 1 through N, N=1–4.
 - **CANCEL (C / D12):** invalidate the attempt and return to idle; takes priority over simultaneous presses.
-- **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break.
+- **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break. **Specified, not yet implemented:** hold ARM/GO for about 1 s while running to reveal now; unfinished lanes show DNF. A short press while running does nothing.
 
 Mode and lane count are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. Group arm applies in both modes; the simultaneous reveal (specification §7, §8.1) supersedes per-lane rearm. Reveal and reveal now are specified but not yet implemented here.
 
@@ -64,6 +64,7 @@ Mode and lane count are saved. Attempts never resume after reboot. Configuration
 | Green | Armed, or completed after a run |
 | Amber, then flashing with each beep | Standing lead-in, then countdown |
 | Blue | Lane started, awaiting finish |
+| Green per lane (specified, not yet implemented) | ST-1 holds that lane's Result; all green triggers the reveal |
 | Red on enabled lanes | Invalid attempt; screen explains after cancellation repeats |
 | Off | Disabled lane |
 
