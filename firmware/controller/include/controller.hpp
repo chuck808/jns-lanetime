@@ -4,8 +4,9 @@
 #include <initializer_list>
 #include <lanetime/protocol.hpp>
 namespace jns {
-enum class State { Idle, Preparing, Armed, Countdown, Running, Complete, Fault };
+enum class State { Idle, Preparing, Armed, Countdown, Running, Revealing, Complete, Fault };
 constexpr uint64_t kPeerUs=3000000, kAttemptUs=30000000;
+constexpr uint64_t kRevealLeadUs=1000000, kRevealRepeatUs=100000;
 // Standing cue schedule: lead-in for radio delivery, then three beeps 1 s apart and GO.
 constexpr uint64_t kCueLeadUs=1000000, kCueStepUs=1000000;
 constexpr uint8_t kCueBeeps=3;
@@ -22,14 +23,21 @@ class Controller {
   Mode mode=Mode::Flying;
   uint8_t lanes=1, started=0, finished=0;
   uint32_t attempt=0;
-  uint64_t results[4]={}, since=0, goAt=0, startAt=0;
+  uint64_t results[4]={}, since=0, goAt=0, startAt=0, revealAt=0;
   const char* reason="Ready to configure";
   uint8_t mask() const { return uint8_t((1U<<lanes)-1); }
   bool active() const {
-    return state==State::Preparing || state==State::Armed || state==State::Countdown || state==State::Running;
+    return state==State::Preparing || state==State::Armed || state==State::Countdown || state==State::Running || state==State::Revealing;
   }
-  void cancel() { state=State::Idle; started=finished=0; goAt=startAt=0; reason="Cancelled / idle"; }
-  void fail(const char* why) { state=State::Fault; reason=why; }
+  void cancel() { state=State::Idle; started=finished=0; goAt=startAt=revealAt=0; reason="Cancelled / idle"; }
+  void fail(const char* why) { state=State::Fault; revealAt=0; reason=why; }
+  // Freeze this attempt's results/mask. Late results cannot change a scheduled reveal.
+  bool reveal(uint64_t now) {
+    if (state!=State::Running) return false;
+    if (now-since>kAttemptUs) { fail("Attempt timeout / DNF"); return false; }
+    revealAt=now+kRevealLeadUs; state=State::Revealing;
+    reason="Results held - revealing shortly"; return true;
+  }
   bool relevant(const Packet& p) const {
     // Start sensors carry the countdown cues in Standing, so they are required in both modes.
     return p.lane<=lanes && (p.role==Role::Finish || p.role==Role::Start);
@@ -45,7 +53,7 @@ class Controller {
   }
   const char* readiness(uint64_t now,bool clear,bool acknowledgements) const {
     if (conflict(now)) return "Duplicate role / controller";
-    if (mode==Mode::Flying && !(started&1) && !clear) return "Lane 1 beam not clear";
+    if (mode==Mode::Flying && (!acknowledgements || !(started&1)) && !clear) return "Lane 1 beam not clear";
     for (uint8_t lane=1;lane<=lanes;++lane) for (Role role:{Role::Start,Role::Finish}) {
       if (role==Role::Start && lane==1) continue;
       const Peer* found=find(now,role,lane);
@@ -78,16 +86,15 @@ class Controller {
   }
   bool arm(uint64_t now,bool clear) {
     if (active()) return false;
-    started=finished=0;
     if (now<kPeerUs) { reason="Discovering sensors"; return false; }
     if (const char* why=readiness(now,clear,false)) { reason=why; return false; }
     if (attempt==UINT32_MAX) { fail("Attempt exhausted - reboot"); return false; }
-    ++attempt; memset(results,0,sizeof(results)); since=now; goAt=startAt=0;
+    ++attempt; started=finished=0; memset(results,0,sizeof(results)); since=now; goAt=startAt=revealAt=0;
     state=State::Preparing; reason="Preparing sensors"; return true;
   }
   bool observe(const uint8_t* mac,const Packet& p,uint64_t now) {
     if (p.system!=system_) return false;
-    if (active() && now>=since && now-since>kAttemptUs) { fail("Attempt timeout / DNF"); return false; }
+    if (active() && state!=State::Revealing && now>=since && now-since>kAttemptUs) { fail("Attempt timeout / DNF"); return false; }
     if (p.kind==Kind::Status) {
       Peer* slot=nullptr;
       for (auto& x:peers_) if (x.used && memcmp(x.mac,mac,6)==0) { slot=&x; break; }
@@ -115,7 +122,6 @@ class Controller {
     if (p.kind==Kind::Result && p.role==Role::Finish && (p.flags&jns::Complete) && !(p.flags&jns::Fault) &&
         (started&bit) && !(finished&bit) && p.value>0 && p.value<=kAttemptUs && state==State::Running) {
       results[p.lane-1]=p.value; finished|=bit;
-      if (finished==mask()) { state=State::Complete; reason="Complete - prototype times"; }
       return true;
     }
     return false;
@@ -131,7 +137,13 @@ class Controller {
     }
     // After arming, local beam changes are events rather than readiness failures.
     if (const char* why=readiness(now,true,true)) { fail(why); return; }
+    if (state==State::Revealing) {
+      if (now>=revealAt) { state=State::Complete; reason="Revealed - prototype times"; }
+      return;
+    }
     if (now-since>kAttemptUs) { fail("Attempt timeout / DNF"); return; }
+    // Use the current loop time, not a queued packet timestamp, for the lead-in.
+    if (state==State::Running && finished==mask()) { reveal(now); return; }
     if (state==State::Countdown) {
       if (now>=firstCue() && !cued(now)) { fail("Cue schedule not acknowledged"); return; }
       if (now>=goAt) { started=mask(); state=State::Running; reason="GO - running"; }

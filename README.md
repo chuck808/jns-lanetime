@@ -43,7 +43,7 @@ ST-1's clock is the common timebase. Its 500 ms heartbeat carries its own timest
 
 ## Project status
 
-Prototype for local club use. The first [ST-1 MagTag firmware](firmware/controller/) is implemented, with live-radio and isolated bench builds. Other device firmware remains to be built. The device images are concept mock-ups, not manufacturing drawings or evidence of tested hardware. Physical MagTag operation has not been validated.
+Prototype for local club use. The first [ST-1 MagTag firmware](firmware/controller/) is implemented, with live-radio and isolated bench builds, scheduled result reveal and a hold-to-reveal control. Other device firmware remains to be built. The device images are concept mock-ups, not manufacturing drawings or evidence of tested hardware. Physical MagTag operation has not been validated.
 
 The first build can use development boards with integrated screens and buttons, plus 3D-printed enclosures. The builder has a Bambu Lab P1S and Fusion 360.
 
