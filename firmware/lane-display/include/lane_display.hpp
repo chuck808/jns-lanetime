@@ -25,7 +25,7 @@ class LaneDisplay {
     if (scheduled_) {
       if (!clock_.ready(now)) { invalidate(); return; }
       if (now>=revealLocal_) {
-        state_=!(finished_&bit())?DisplayState::Dnf:
+        state_=!(finished_&laneBit())?DisplayState::Dnf:
             haveResult_?DisplayState::Time:DisplayState::Unavailable;
         terminal_=true;
       }
@@ -67,7 +67,7 @@ class LaneDisplay {
         if (p.kind!=Kind::Status && p.kind!=Kind::Arm && p.kind!=Kind::Cancel) return;
         attempt_=p.attempt; mode_=p.mode; mask_=p.mask; adoptedAt_=at;
         terminal_=false; scheduled_=haveResult_=peer_=false; elapsed_=0;
-        state_=(mask_&bit())?DisplayState::Pending:DisplayState::Disabled;
+        state_=(mask_&laneBit())?DisplayState::Pending:DisplayState::Disabled;
       }
       if (!attempt_) return;
       if (p.kind==Kind::Cancel || (p.kind==Kind::Status && (p.flags&jns::Fault))) {
@@ -102,7 +102,7 @@ class LaneDisplay {
     }
   }
  private:
-  uint8_t bit() const { return uint8_t(1U<<(lane_-1)); }
+  uint8_t laneBit() const { return uint8_t(1U<<(lane_-1)); }
   void invalidate() {
     terminal_=true; scheduled_=haveResult_=false; elapsed_=0; state_=DisplayState::Unavailable;
   }
