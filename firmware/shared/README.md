@@ -5,7 +5,7 @@
 
 # Prototype wire contract v2
 
-`include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. Other device firmware is still to be built. This contract may change during bench testing and has no JNS_Timing code dependency.
+`include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. The lane-display prototype also uses this contract; sensor/spare firmware is still to be built. This contract may change during bench testing and has no JNS_Timing code dependency.
 
 ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-endian, explicitly encoded; no packed structs or native-endian assumptions.
 

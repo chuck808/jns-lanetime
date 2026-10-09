@@ -298,3 +298,7 @@ Recorded the agreed finish-sensor methods: the exact timebase method with interp
 ## ST-1 reveal implementation note — 9 October 2026
 
 The controller freezes its collected Results and finished mask, schedules Reveal 1 s ahead, and repeats it every 100 ms. A fresh ARM/GO press held for 1 s while Running schedules an early reveal; holding the original ARM/GO does not. Late Results cannot change that reveal. Configuration and eInk refresh stay locked during the lead-in; cancellation and faults invalidate it. A reveal accepted by the 30 s attempt deadline may complete its lead-in afterwards. Required sensor readiness checks continue through the lead-in. A display missing the Result for a set finished-mask bit must show unavailable rather than DNF. Physical radio/display verification remains outstanding.
+
+## Lane-display prototype note — 9 October 2026
+
+The lane-display target now contains receive-only state logic and ESP32-C3-DevKitM-1/MAX7219 FC16 builds for lanes 1–4, plus a radio-free display demo. This is a provisional hardware option pending the club's outdoor readability test, not a final display selection. The prototype uses build-time lane identity; the specified physical lane switch remains unimplemented. It distinguishes missing data (ERR) from DNF, retires cancelled/expired attempts and clears output on controller loss. See the target README for provisional pin allocation, power/logic interfacing, failure behaviour and verification. Sensor/spare firmware and physical validation remain outstanding.

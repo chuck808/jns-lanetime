@@ -43,7 +43,7 @@ ST-1's clock is the common timebase. Its 500 ms heartbeat carries its own timest
 
 ## Project status
 
-Prototype for local club use. The first [ST-1 MagTag firmware](firmware/controller/) is implemented, with live-radio and isolated bench builds, scheduled result reveal and a hold-to-reveal control. Other device firmware remains to be built. The device images are concept mock-ups, not manufacturing drawings or evidence of tested hardware. Physical MagTag operation has not been validated.
+Prototype for local club use. The first [ST-1 MagTag firmware](firmware/controller/) is implemented, with live-radio and isolated bench builds, scheduled result reveal and a hold-to-reveal control. An [ESP32-C3/MAX7219 lane-display prototype](firmware/lane-display/) now supports scheduled reveal and a radio-free readability demo. Start/finish sensor and spare firmware remain to be built. The device images are concept mock-ups, not manufacturing drawings or evidence of tested hardware. Physical MagTag operation has not been validated.
 
 The first build can use development boards with integrated screens and buttons, plus 3D-printed enclosures. The builder has a Bambu Lab P1S and Fusion 360.
 
@@ -60,4 +60,4 @@ The first build can use development boards with integrated screens and buttons, 
 | `images/` | Current device concept mock-ups |
 | `firmware/` | Five planned firmware targets and shared modules |
 
-ST-1 uses Arduino C++ and PlatformIO on the MagTag ESP32-S2. Native tests and all three hardware builds run in GitHub Actions. No dependency on JNS_Timing code. Cruiser bikes are excluded; phone control and a handheld remote are deferred.
+ST-1 uses Arduino C++ and PlatformIO on the MagTag ESP32-S2. Native tests, the three controller builds and five C3 display builds run in GitHub Actions. No dependency on JNS_Timing code. Cruiser bikes are excluded; phone control and a handheld remote are deferred.
