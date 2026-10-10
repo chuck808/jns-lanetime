@@ -302,3 +302,7 @@ The controller freezes its collected Results and finished mask, schedules Reveal
 ## Lane-display prototype note — 9 October 2026
 
 The lane-display target now contains receive-only state logic and ESP32-C3-DevKitM-1/MAX7219 FC16 builds for lanes 1–4, plus a radio-free display demo. This is a provisional hardware option pending the club's outdoor readability test, not a final display selection. The prototype uses build-time lane identity; the specified physical lane switch remains unimplemented. It distinguishes missing data (ERR) from DNF, retires cancelled/expired attempts and clears output on controller loss. See the target README for provisional pin allocation, power/logic interfacing, failure behaviour and verification. Sensor/spare firmware and physical validation remain outstanding.
+
+## FN-1 prototype note — 9 October 2026
+
+The finish target now implements lane 1 on ESP32-C3-DevKitM-1: qualified timestamped edges, an eight-event buffer, late START support, scheduled Standing GO acknowledgement, interpolated finish selection and immutable repeated Results. A live-radio GPIO bench build disables optical drive. The controller/finish/display interaction is tested in a wire-encoded native simulation; physical timing remains unverified. This is FN-1 only, not yet the planned common FN-1–FN-4 target. Pin allocation, optics assumptions and recovery behaviour are documented in the finish-target README.

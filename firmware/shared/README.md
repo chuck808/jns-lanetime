@@ -1,11 +1,12 @@
 # Shared code
 
+- `include/lanetime/beam.hpp`: shared qualified beam-edge logic used by ST-1 and FN-1.
 - `include/lanetime/protocol.hpp`: wire contract encoder/decoder (below).
 - `include/lanetime/timebase.hpp`: ST-1 timebase tracking (specification §5.1). Native tests: `sh firmware/shared/tests/run.sh`. Callers must serialise `sample()` (radio callback) against conversions (main loop).
 
 # Prototype wire contract v2
 
-`include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. The lane-display prototype also uses this contract; sensor/spare firmware is still to be built. This contract may change during bench testing and has no JNS_Timing code dependency.
+`include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. The lane-display prototype also uses this contract; FN-1 also uses it; other sensor/spare firmware is still to be built. This contract may change during bench testing and has no JNS_Timing code dependency.
 
 ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-endian, explicitly encoded; no packed structs or native-endian assumptions.
 
