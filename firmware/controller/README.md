@@ -1,6 +1,6 @@
 # ST-1 MagTag prototype
 
-Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks and result collection. Other device firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
+Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. Other device firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
 
 The normal build refuses to arm without compatible sensor announcements. Use the explicitly isolated bench build to try ST-1 alone.
 
@@ -51,9 +51,9 @@ Set `JNS_SYSTEM_ID` to the same unique value across this installation and use a 
 - **MODE (A / D15):** switch Flying/Standing while inactive.
 - **LANES (B / D14):** select contiguous lanes 1 through N, N=1–4.
 - **CANCEL (C / D12):** invalidate the attempt and return to idle; takes priority over simultaneous presses.
-- **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break. **Specified, not yet implemented:** hold ARM/GO for about 1 s while running to reveal now; unfinished lanes show DNF. A short press while running does nothing.
+- **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break. Press and hold ARM/GO for 1 s while running to schedule an early reveal; lanes without a collected Result show DNF. A short press while running does nothing. The hold must begin with a fresh press while running: holding the original ARM or GO does not trigger reveal.
 
-Mode and lane count are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. Group arm applies in both modes; the simultaneous reveal (specification §7, §8.1) supersedes per-lane rearm. Reveal and reveal now are specified but not yet implemented here.
+Mode and lane count are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. Group arm applies in both modes; the simultaneous reveal (specification §7, §8.1) supersedes per-lane rearm. Both automatic and early reveals freeze the result set, then repeat a common reveal timestamp every 100 ms during a 1 s lead-in. Late results cannot change the finished mask. Configuration stays locked and eInk remains untouched until that instant; CANCEL still discards the attempt.
 
 **The eInk screen is for setup/results; it retains its previous image while an attempt is active. Use the LEDs for live state.** Inactive refreshes may briefly delay button response. There are no eInk refreshes while preparing, armed, counting down or running.
 
@@ -61,16 +61,17 @@ Mode and lane count are saved. Attempts never resume after reboot. Configuration
 | --- | --- |
 | Dim white; lane 1 red in Flying when broken | Enabled idle lane; local beam not clear |
 | Amber | Preparing / waiting for sensor acknowledgements |
-| Green | Armed, or completed after a run |
+| Green | Armed, or a finished lane after reveal |
 | Amber, then flashing with each beep | Standing lead-in, then countdown |
 | Blue | Lane started, awaiting finish |
-| Green per lane (specified, not yet implemented) | ST-1 holds that lane's Result; all green triggers the reveal |
+| Green per lane while running | ST-1 holds that lane's Result; all green triggers the reveal |
 | Red on enabled lanes | Invalid attempt; screen explains after cancellation repeats |
+| Amber during/after reveal | Lane marked DNF |
 | Off | Disabled lane |
 
 Colours describe controller state, not optical signal margin. ST-1 sounds lane 1's cue from an `esp_timer` at the scheduled instants; ST-2–ST-N are to do the same for their lanes. Onset alignment between posts is unmeasured.
 
-For a standalone test, upload `magtag_bench`, choose Standing, press ARM, wait for green, then press GO. Expect a one-second pause, three short tones, a GO tone and blue LEDs. Simulated peers acknowledge the schedule. CANCEL resets it. For Flying, fit and align the optics, ARM and interrupt lane 1. External readiness is simulated but the local beam is real. There are no simulated results or lane 2–4 start events: cancel or let the attempt time out. The screen says BENCH and no radio packets are transmitted.
+For a standalone test, upload `magtag_bench`, choose Standing, press ARM, wait for green, then press GO. Expect a one-second pause, three short tones, a GO tone and blue LEDs. Simulated peers acknowledge the schedule. CANCEL resets it. For Flying, fit and align the optics, ARM and interrupt lane 1. External readiness is simulated but the local beam is real. There are no simulated results or lane 2–4 start events: release GO, then press and hold it while running to try an all-DNF reveal, cancel, or let the attempt time out. The screen says BENCH and no radio packets are transmitted.
 
 ## Attempt handling
 
@@ -83,7 +84,8 @@ See the [prototype wire contract](../shared/README.md) before implementing peers
 - Required sensor status expires after three seconds. Peer reboot/identity change, new sensors during an armed run, sensor faults, queue overflow and send failures invalidate the attempt.
 - START carries the lane 1 event time and is resent every 100 ms until FN-1 reports Running. GO carries the scheduled GO time and is resent every 250 ms until every required unit echoes it with Cued. If any has not echoed it by the first beep, the attempt is abandoned. Send failures are retried rather than treated as faults; receive-queue overflow still invalidates the attempt.
 - Results must match an announced finish MAC/boot identity, current session/attempt, and a lane whose start this controller observed. The first result is latched. If ST-1 misses a START that its finish node receives, that lane's result is conservatively rejected.
-- The provisional group deadline is 30 seconds from ARM, including preparation and the four-second countdown. Timeout invalidates the group rather than presenting a partial set as complete.
+- All collected Results automatically trigger reveal. A fresh 1 s hold of ARM/GO while running freezes any partial set (including zero finishes) and marks the other lanes DNF. Reveal carries the same timestamp and finished mask on each repeat; the local eInk lists times/DNF in lane order after the reveal.
+- The provisional group deadline is 30 seconds from ARM, including preparation and the four-second countdown. Timeout invalidates the group rather than presenting a partial set as complete. A reveal scheduled by the deadline may finish its 1 s lead-in afterwards. Required sensor checks continue during that lead-in.
 - CANCEL repeats for two seconds. Receivers must also expire controller status locally; delivery of cancellation is not guaranteed.
 
 Radio callbacks enqueue bounded records; the receiver interrupt captures edges; the main loop owns state. Hardware PWM generates the carrier independently. Cue tones run from an `esp_timer` callback, not the loop.
@@ -97,9 +99,9 @@ sh tests/run.sh
 pio run -e magtag -e magtag_legacy -e magtag_bench
 ```
 
-Native tests cover wire validation, readiness, duplicate/stale events, wrong-device results, reboot/conflicts, missing peers, Standing transitions, multi-lane completion, the Standing cue schedule and its acknowledgement, START resend, and beam qualification. GitHub Actions runs these and all three builds.
+Native tests cover wire validation, readiness, duplicate/stale events, wrong-device results, reboot/conflicts, missing peers, Standing transitions, multi-lane completion, the Standing cue schedule and its acknowledgement, START resend, beam qualification, Reveal wire validation, automatic/partial/all-DNF reveal, late-result rejection, cancellation/faults during reveal, deadline boundaries, and fresh-press hold behaviour. GitHub Actions runs these and all three builds.
 
-On the bench, check screen variant/buttons, carrier waveform/current, receiver polarity/disconnection, clear/break detection, cancel during countdown and supply stability with wireless active. Then add one finish node and compare timing against a common reference before expanding to four lanes. Hardware verification remains outstanding.
+On the bench, check screen variant/buttons, carrier waveform/current, receiver polarity/disconnection, clear/break detection, cancel during countdown and supply stability with wireless active. Then add one finish node and compare timing against a common reference before expanding to four lanes. Hardware verification remains outstanding. Once lane displays exist, verify simultaneous reveal, early partial/all-DNF reveal, lost Reveal copies, and cancellation during the lead-in with real radios. Controller-side tests/builds do not establish end-to-end display operation.
 
 ## References
 

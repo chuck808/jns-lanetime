@@ -13,7 +13,7 @@ ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-en
 | --- | --- | --- |
 | 0 | 4 | ASCII `JNSL` |
 | 4 | 1 | Version = 2 (v1 is rejected) |
-| 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7 (specified; not yet in `protocol.hpp`) |
+| 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7 |
 | 6 | 1 | Sender role: Controller=1, Start=2, Finish=3 |
 | 7 | 1 | Sender lane 1–4; controller always lane 1 |
 | 8 | 4 | System ID |
@@ -55,7 +55,11 @@ On GO, every required start and finish unit stores the GO time and echoes it in 
 
 Result comes from the matching finish sensor, with its own role/lane/boot token, the adopted controller session/attempt/mode/mask, Complete flag and elapsed microseconds computed in ST-1 time. Repeating an immutable Result is allowed; the controller accepts the first. Receive-only lane displays filter by lane/session/attempt and clear stale output; they do not announce themselves.
 
-ST-1 sends Reveal once it holds every enabled lane's Result, or when the coach presses reveal now. It repeats Reveal until the reveal time, about 1 s after the first copy. Each display holds its own lane's Result and shows it at the reveal time, converted through its timebase, not on receipt. A lane whose bit is clear in the finished-lane mask shows DNF. Displays show only their own lane's time.
+ST-1 sends Reveal once it holds every enabled lane's Result, or when the coach presses reveal now. It freezes the result set and schedules the reveal 1 s ahead, then submits Reveal immediately and every 100 ms until that instant. Busy/failed submissions are retried; the timestamp and mask never change. Each display holds its own lane's Result and shows it at the reveal time, converted through its timebase, not on receipt. A lane whose bit is clear in the finished-lane mask shows DNF. Displays show only their own lane's time. A set bit with no matching Result means missing data, not DNF: show an explicit unavailable indication. A display must receive at least one Reveal before its deadline for a synchronised reveal; receive-only broadcast cannot guarantee delivery.
+
+Reveal uses byte 27 for a finished mask that must be a subset of the enabled mask (zero means all DNF). It must come from Controller lane 1 and have nonzero session, attempt, reveal time and boot token. Other packets still require byte 27 to be zero. The existing 40-byte v2 layout is retained; older decoders reject Reveal, so display firmware must use the updated shared decoder.
+
+ST-1 keeps configuration locked and eInk refresh suspended during its reveal lead-in. CANCEL and faults abort the scheduled reveal. The 30-second deadline applies to collecting results; a reveal scheduled by that deadline may finish its one-second lead-in afterwards. Required sensor readiness/identity checks remain active until the reveal.
 
 CANCEL is terminal for the matching session/attempt regardless of subsequent configuration changes. Controller Fault status must also invalidate matching attempts/results. Expire control status locally after a provisional three seconds so lost cancellation cannot leave a sensor armed indefinitely. ST-1 sends Status every 500 ms in every state; required sensor status likewise expires after three seconds at ST-1. The group deadline is 30 seconds from ARM. Controller Preparing is represented by ARM packets, without Armed in controller Status.
 

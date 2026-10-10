@@ -11,6 +11,7 @@
 #include <freertos/queue.h>
 #include "controller.hpp"
 #include "beam.hpp"
+#include "button.hpp"
 #ifndef JNS_BENCH
 #define JNS_BENCH 0
 #endif
@@ -34,6 +35,7 @@ Controller* controller=nullptr;
 Beam beam;
 uint64_t sessionId=0, lastHeartbeat=0, lastArmSend=0, lastPaint=0, toneUntil=0;
 uint64_t lastPixels=0, cancelUntil=0, lastCancel=0, lastGoSend=0, lastStartSend=0;
+uint64_t lastRevealSend=0, sentRevealAt=0;
 uint32_t bootId=0;
 bool dirty=true, radioReady=false, fatalHardware=false;
 struct Received { uint8_t mac[6]; uint8_t data[kPacketSize]; uint64_t at; };
@@ -73,7 +75,8 @@ Packet packet(Kind kind) {
   p.attempt=controller->attempt; p.mode=controller->mode; p.mask=controller->mask();
   if (controller->state==State::Armed || controller->state==State::Countdown || controller->state==State::Running) p.flags|=jns::Armed;
   if (controller->state==State::Running) p.flags|=jns::Running;
-  if (controller->state==State::Complete) p.flags|=jns::Complete;
+  if (controller->state==State::Revealing || controller->state==State::Complete) p.flags|=jns::Complete;
+  if (kind==Kind::Reveal) p.finishedMask=controller->finished;
   if (controller->state==State::Fault) p.flags|=jns::Fault;
   if (controller->mode==Mode::Standing || beam.clear(nowUs())) p.flags|=jns::Ready;
   return p;
@@ -134,7 +137,8 @@ const char* stateName(State state) {
   switch (state) {
     case State::Idle:return "IDLE"; case State::Preparing:return "PREPARING";
     case State::Armed:return "ARMED"; case State::Countdown:return "COUNTDOWN";
-    case State::Running:return "RUNNING"; case State::Complete:return "COMPLETE";
+    case State::Running:return "RUNNING"; case State::Revealing:return "REVEALING";
+    case State::Complete:return "COMPLETE";
     case State::Fault:return "INVALID";
   }
   return "?";
@@ -151,8 +155,10 @@ void paint() {
   display.printf("Lane 1 beam: %s\n",beam.clear(nowUs())?"CLEAR":"BROKEN / settling");
   if (controller->state==State::Complete) {
     for (uint8_t i=0;i<controller->lanes;++i) {
-      const uint64_t rounded=(controller->results[i]+500)/1000;
-      display.printf("L%u: %lu.%03lu s  ",i+1,(unsigned long)(rounded/1000),(unsigned long)(rounded%1000));
+      if (controller->finished&(1U<<i)) {
+        const uint64_t rounded=(controller->results[i]+500)/1000;
+        display.printf("L%u: %lu.%03lu s  ",i+1,(unsigned long)(rounded/1000),(unsigned long)(rounded%1000));
+      } else display.printf("L%u: DNF  ",i+1);
       if (i%2) display.println();
     }
   } else {
@@ -165,16 +171,7 @@ void paint() {
 void saveSettings() {
   preferences.putUChar("mode",uint8_t(controller->mode)); preferences.putUChar("lanes",controller->lanes);
 }
-struct Button {
-  bool raw=false, stable=false;
-  uint64_t changed=0;
-  bool pressed(uint8_t pin,uint64_t now) {
-    bool down=digitalRead(pin)==LOW;
-    if (down!=raw) { raw=down; changed=now; }
-    if (raw!=stable && now-changed>=30000) { stable=raw; return stable; }
-    return false;
-  }
-} button[4];
+Button button[4];
 void benchPeers(uint64_t now) {
   if (!JNS_BENCH) return;
   for (uint8_t lane=1;lane<=controller->lanes;++lane) for (Role role:{Role::Start,Role::Finish}) {
@@ -257,11 +254,15 @@ void loop() {
   bool radioError=overflow; sendFailed=false; overflow=false;
   portEXIT_CRITICAL(&radioLock);
   if (radioError && controller->active()) controller->fail("Radio queue / send fault");
-  bool pressed[4]; for (int i=0;i<4;++i) pressed[i]=button[i].pressed(buttons[i],now);
+  bool pressed[4];
+  for (int i=0;i<4;++i) pressed[i]=button[i].update(digitalRead(buttons[i])==LOW,now,
+      i==3 && before==State::Running && controller->state==State::Running);
+  const bool revealHeld=button[3].held(now);
   // CANCEL wins over simultaneous GO.
   if (pressed[2] && !fatalHardware) {
     controller->cancel(); cancelUntil=now+2000000; transmit(Kind::Cancel); dirty=true;
   } else if (!fatalHardware) {
+    if (revealHeld) controller->reveal(now);
     if (!controller->active() && (pressed[0] || pressed[1])) {
       const bool retire=controller->state!=State::Idle;
       controller->cancel();
@@ -282,6 +283,13 @@ void loop() {
     }
   }
   now=nowUs();
+  // Repeat the same immutable schedule; a busy/failed submission retries next loop.
+  if (controller->state==State::Revealing && now<controller->revealAt &&
+      (sentRevealAt!=controller->revealAt || now-lastRevealSend>=kRevealRepeatUs)) {
+    if (transmit(Kind::Reveal,controller->revealAt)) {
+      sentRevealAt=controller->revealAt; lastRevealSend=now;
+    }
+  }
   if (controller->state==State::Preparing && now-lastArmSend>=250000) {
     if (transmit(Kind::Arm)) lastArmSend=now;
   }
@@ -313,7 +321,8 @@ void loop() {
         case State::Countdown: color=(now>=controller->firstCue() && (now-controller->firstCue())%kCueStepUs<200000)?pixels.Color(180,80,0):pixels.Color(120,40,0); break;
         case State::Running: color=(controller->finished&(1<<i))?pixels.Color(0,120,0):
             (controller->started&(1<<i))?pixels.Color(0,0,180):pixels.Color(0,180,0); break;
-        case State::Complete: color=pixels.Color(0,120,0); break;
+        case State::Revealing:
+        case State::Complete: color=(controller->finished&(1U<<i))?pixels.Color(0,120,0):pixels.Color(180,40,0); break;
         default: color=controller->mode==Mode::Flying && i==0 && !beam.clear(now)?pixels.Color(100,0,0):pixels.Color(20,20,20); break;
       }
       pixels.setPixelColor(i,color);
