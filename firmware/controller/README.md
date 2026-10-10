@@ -1,6 +1,6 @@
 # ST-1 MagTag prototype
 
-Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. Other device firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
+Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. A C3/MAX7219 lane-display prototype is available; start/finish sensor and spare firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
 
 The normal build refuses to arm without compatible sensor announcements. Use the explicitly isolated bench build to try ST-1 alone.
 
@@ -101,7 +101,7 @@ pio run -e magtag -e magtag_legacy -e magtag_bench
 
 Native tests cover wire validation, readiness, duplicate/stale events, wrong-device results, reboot/conflicts, missing peers, Standing transitions, multi-lane completion, the Standing cue schedule and its acknowledgement, START resend, beam qualification, Reveal wire validation, automatic/partial/all-DNF reveal, late-result rejection, cancellation/faults during reveal, deadline boundaries, and fresh-press hold behaviour. GitHub Actions runs these and all three builds.
 
-On the bench, check screen variant/buttons, carrier waveform/current, receiver polarity/disconnection, clear/break detection, cancel during countdown and supply stability with wireless active. Then add one finish node and compare timing against a common reference before expanding to four lanes. Hardware verification remains outstanding. Once lane displays exist, verify simultaneous reveal, early partial/all-DNF reveal, lost Reveal copies, and cancellation during the lead-in with real radios. Controller-side tests/builds do not establish end-to-end display operation.
+On the bench, check screen variant/buttons, carrier waveform/current, receiver polarity/disconnection, clear/break detection, cancel during countdown and supply stability with wireless active. Then add one finish node and compare timing against a common reference before expanding to four lanes. Hardware verification remains outstanding. Using the lane-display prototype and actual sensor nodes, verify simultaneous reveal, early partial/all-DNF reveal, lost Reveal copies, and cancellation during the lead-in with real radios. Controller-side tests/builds do not establish end-to-end display operation.
 
 ## References
 
