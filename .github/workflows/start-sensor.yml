@@ -1,0 +1,23 @@
+name: External start firmware
+on:
+  push:
+    paths: ['firmware/start-sensor/**', 'firmware/shared/**', 'firmware/controller/include/**', 'firmware/lane-display/include/**', '.github/workflows/start-sensor.yml']
+  pull_request:
+    paths: ['firmware/start-sensor/**', 'firmware/shared/**', 'firmware/controller/include/**', 'firmware/lane-display/include/**', '.github/workflows/start-sensor.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - run: sh firmware/shared/tests/run.sh
+      - run: sh firmware/controller/tests/run.sh
+      - run: sh firmware/lane-display/tests/run.sh
+      - run: sh firmware/finish-sensor/tests/run.sh
+      - run: sh firmware/start-sensor/tests/run.sh
+      - run: pio run -d firmware/start-sensor -e c3_st2 -e c3_st3 -e c3_st4 -e c3_st2_sync

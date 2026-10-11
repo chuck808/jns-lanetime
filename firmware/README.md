@@ -1,6 +1,6 @@
 # Firmware overview
 
-One repository, five planned firmware targets. Lane numbers are configuration values, not separate codebases. ST-1 now has an Arduino/PlatformIO MagTag prototype; lane displays now have a C3/MAX7219 prototype; FN-1 has a C3 optical/GPIO prototype; external start sensors, other finish lanes and spare remain outstanding. Shared code contains the wire encoder/decoder (contract v2). All units work in ST-1's timebase (specification §5).
+One repository, five planned firmware targets. Lane numbers are configuration values, not separate codebases. ST-1 now has an Arduino/PlatformIO MagTag prototype; lane displays now have a C3/MAX7219 prototype; FN-1 has a C3 optical/GPIO prototype; external start sensors now have a C3 prototype; other finish lanes and spare remain outstanding. Shared code contains the wire encoder/decoder (contract v2). All units work in ST-1's timebase (specification §5).
 
 | Target | Devices | Responsibilities |
 | --- | --- | --- |

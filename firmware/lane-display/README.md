@@ -1,6 +1,6 @@
 # Lane result display prototype
 
-Receive-only ESP-NOW result display for LN-1 through LN-4, with an ESP32-C3 and a four-module MAX7219 32×8 FC16 matrix. This is a buildable prototype, not validated hardware. It depends on the ST-1 scheduled Reveal implementation; start/finish sensor firmware is still outstanding.
+Receive-only ESP-NOW result display for LN-1 through LN-4, with an ESP32-C3 and a four-module MAX7219 32×8 FC16 matrix. This is a buildable prototype, not validated hardware. It depends on the ST-1 scheduled Reveal implementation; FN-1 and ST-2–ST-4 prototypes are available; FN-2–FN-4 remain outstanding.
 
 `include/lane_display.hpp` is hardware-independent state logic using the shared wire decoder/timebase. `src/main.cpp` provides the C3 radio and matrix adapter. Alternative digit hardware can replace the adapter without changing result handling.
 

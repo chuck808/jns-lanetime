@@ -1,6 +1,6 @@
 # ST-1 MagTag prototype
 
-Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. A C3/MAX7219 lane-display prototype is available; start/finish sensor and spare firmware is still to be built. This is a bench prototype: physical operation and timing accuracy have not been validated.
+Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. A C3/MAX7219 lane-display prototype is available; FN-1 and ST-2–ST-4 prototypes are available; FN-2–FN-4 and spare firmware remain outstanding. This is a bench prototype: physical operation and timing accuracy have not been validated.
 
 The normal build refuses to arm without compatible sensor announcements. Use the explicitly isolated bench build to try ST-1 alone.
 
@@ -69,7 +69,7 @@ Mode and lane count are saved. Attempts never resume after reboot. Configuration
 | Amber during/after reveal | Lane marked DNF |
 | Off | Disabled lane |
 
-Colours describe controller state, not optical signal margin. ST-1 sounds lane 1's cue from an `esp_timer` at the scheduled instants; ST-2–ST-N are to do the same for their lanes. Onset alignment between posts is unmeasured.
+Colours describe controller state, not optical signal margin. ST-1 sounds lane 1's cue from an `esp_timer` at the scheduled instants; ST-2–ST-N now have a C3 prototype to do the same for their lanes. Onset alignment between posts is unmeasured.
 
 For a standalone test, upload `magtag_bench`, choose Standing, press ARM, wait for green, then press GO. Expect a one-second pause, three short tones, a GO tone and blue LEDs. Simulated peers acknowledge the schedule. CANCEL resets it. For Flying, fit and align the optics, ARM and interrupt lane 1. External readiness is simulated but the local beam is real. There are no simulated results or lane 2–4 start events: release GO, then press and hold it while running to try an all-DNF reveal, cancel, or let the attempt time out. The screen says BENCH and no radio packets are transmitted.
 

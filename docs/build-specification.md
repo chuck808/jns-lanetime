@@ -306,3 +306,7 @@ The lane-display target now contains receive-only state logic and ESP32-C3-DevKi
 ## FN-1 prototype note — 9 October 2026
 
 The finish target now implements lane 1 on ESP32-C3-DevKitM-1: qualified timestamped edges, an eight-event buffer, late START support, scheduled Standing GO acknowledgement, interpolated finish selection and immutable repeated Results. A live-radio GPIO bench build disables optical drive. The controller/finish/display interaction is tested in a wire-encoded native simulation; physical timing remains unverified. This is FN-1 only, not yet the planned common FN-1–FN-4 target. Pin allocation, optics assumptions and recovery behaviour are documented in the finish-target README.
+
+## External start prototype note — 11 October 2026
+
+ST-2–ST-4 now have build-time-lane ESP32-C3-DevKitM-1 builds. They capture the first qualified Flying beam break, interpolate it into ST-1 time and retry the immutable START until the matching finish acknowledges. Standing GO is converted into a frozen local cue schedule before Cued is announced; late schedules are rejected. The adapter services cues using an esp_timer task with bounded-lateness and main-loop lease checks. The target README documents provisional optics/sound pins, failure handling and real-radio limitations. Native integration covers the actual controller and all three start engines with simulated finish statuses. FN-2–FN-4, the spare, final sensor UI and physical timing/cue validation remain outstanding.
