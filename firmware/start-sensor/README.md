@@ -1,6 +1,6 @@
 # External start sensors ST-2–ST-4
 
-Buildable ESP32-C3 prototype for lanes 2–4. ST-1 remains the MagTag controller and lane-one start. This target implements Flying beam starts and scheduled local Standing cues using the existing v2 wire contract. FN-2–FN-4 remain outstanding: these builds alone do not make a working four-lane system. Physical operation and timing accuracy are unverified.
+Buildable ESP32-C3 prototype for lanes 2–4. ST-1 remains the MagTag controller and lane-one start. This target implements Flying beam starts and scheduled local Standing cues using the existing v2 wire contract. The common finish target now supports FN-1–FN-4; full four-lane hardware validation remains outstanding. Physical operation and timing accuracy are unverified.
 
 ## Build
 
@@ -46,6 +46,6 @@ sh firmware/start-sensor/tests/run.sh
 pio run -d firmware/start-sensor -e c3_st2 -e c3_st3 -e c3_st4 -e c3_st2_sync
 ```
 
-Native tests exercise all three lane identities, interpolation, immutable retries and matching finish acknowledgements, short-pulse rejection, countdown timestamps and late-cue silence, cancellation, session/identity conflicts, reboot, timeout, overflow, disabled lanes and controller integration in both modes. Integration uses the actual controller and all three start engines with explicit simulated finish statuses; it does not substitute for implementing/testing FN-2–FN-4.
+Native tests exercise all three lane identities, interpolation, immutable retries and matching finish acknowledgements, short-pulse rejection, countdown timestamps and late-cue silence, cancellation, session/identity conflicts, reboot, timeout, overflow, disabled lanes and controller integration in both modes. This target's controller integration uses explicit simulated finish statuses. The finish target additionally runs four-lane integration with actual start, finish, controller and display engines; run `sh firmware/finish-sensor/tests/run.sh` for that coverage.
 
 Before club use: measure shared-edge clock conversion against ST-1, beam timing and ambient-light behaviour, sound onset alignment (including ST-1), and cancellation/dropout behaviour on real radios. Bench GPIO input can generate genuine START packets. Do not claim millisecond accuracy from timestamp units or display precision.

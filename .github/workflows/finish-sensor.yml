@@ -1,9 +1,9 @@
-name: FN-1 firmware
+name: Finish sensor firmware
 on:
   push:
-    paths: ['firmware/finish-sensor/**', 'firmware/shared/**', 'firmware/controller/include/**', 'firmware/lane-display/include/**', '.github/workflows/finish-sensor.yml']
+    paths: ['firmware/finish-sensor/**', 'firmware/start-sensor/include/**', 'firmware/shared/**', 'firmware/controller/include/**', 'firmware/lane-display/include/**', '.github/workflows/finish-sensor.yml']
   pull_request:
-    paths: ['firmware/finish-sensor/**', 'firmware/shared/**', 'firmware/controller/include/**', 'firmware/lane-display/include/**', '.github/workflows/finish-sensor.yml']
+    paths: ['firmware/finish-sensor/**', 'firmware/start-sensor/include/**', 'firmware/shared/**', 'firmware/controller/include/**', 'firmware/lane-display/include/**', '.github/workflows/finish-sensor.yml']
 permissions:
   contents: read
 jobs:
@@ -19,4 +19,5 @@ jobs:
       - run: sh firmware/controller/tests/run.sh
       - run: sh firmware/lane-display/tests/run.sh
       - run: sh firmware/finish-sensor/tests/run.sh
-      - run: pio run -d firmware/finish-sensor -e c3_fn1 -e c3_fn1_sync
+      - run: sh firmware/start-sensor/tests/run.sh
+      - run: pio run -d firmware/finish-sensor -e c3_fn1 -e c3_fn2 -e c3_fn3 -e c3_fn4 -e c3_fn1_sync -e c3_fn2_sync

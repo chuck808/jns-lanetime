@@ -1,6 +1,6 @@
 # ST-1 MagTag prototype
 
-Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. A C3/MAX7219 lane-display prototype is available; FN-1 and ST-2–ST-4 prototypes are available; FN-2–FN-4 and spare firmware remain outstanding. This is a bench prototype: physical operation and timing accuracy have not been validated.
+Arduino C++ firmware for the Adafruit MagTag (ESP32-S2), built with PlatformIO. It implements setup, group arming, the common ST-1 timebase heartbeat, the scheduled Standing countdown, Flying lane 1 start detection, sensor readiness/conflict checks, result collection and scheduled result reveal. A C3/MAX7219 lane-display prototype is available; FN-1–FN-4 and ST-2–ST-4 prototypes are available; spare firmware remains outstanding. This is a bench prototype: physical operation and timing accuracy have not been validated.
 
 The normal build refuses to arm without compatible sensor announcements. Use the explicitly isolated bench build to try ST-1 alone.
 

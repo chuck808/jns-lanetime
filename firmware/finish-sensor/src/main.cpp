@@ -11,6 +11,7 @@
 #define JNS_SYNC_BENCH 0
 #endif
 using namespace jns;
+static_assert(JNS_LANE>=1 && JNS_LANE<=4,"Finish lane must be 1–4");
 static_assert(JNS_RADIO_CHANNEL>=1 && JNS_RADIO_CHANNEL<=13,"Invalid radio channel");
 constexpr uint8_t broadcastMac[]={255,255,255,255,255,255};
 struct Input {
@@ -62,7 +63,7 @@ void setup() {
   pinMode(JNS_IR_TX,OUTPUT); digitalWrite(JNS_IR_TX,LOW);
   pinMode(JNS_IR_RX,INPUT_PULLUP); pinMode(JNS_ALIGN_LED,OUTPUT);
   uint32_t boot=esp_random(); if (!boot) boot=1;
-  static FinishSensor instance(JNS_SYSTEM_ID,boot); sensor=&instance;
+  static FinishSensor instance(JNS_SYSTEM_ID,boot,JNS_LANE); sensor=&instance;
   inbox=xQueueCreate(48,sizeof(Input));
   if (!inbox) { sensor->hardwareFault(); return; }
   WiFi.setAutoReconnect(false); WiFi.mode(WIFI_STA); WiFi.disconnect(); WiFi.setSleep(false);
@@ -80,11 +81,11 @@ void setup() {
   }
   sensor->edge(digitalRead(JNS_IR_RX)!=LOW,nowUs());
   attachInterrupt(digitalPinToInterrupt(JNS_IR_RX),beamEdge,CHANGE);
-  Serial.println(JNS_SYNC_BENCH?"FN-1 GPIO bench: LIVE radio, IR disabled":"FN-1 optical prototype");
+  Serial.println(JNS_SYNC_BENCH?"Finish GPIO bench: LIVE radio, IR disabled":"Finish optical prototype");
 }
 void loop() {
   portENTER_CRITICAL(&radioLock); const bool overflow=lost; lost=false; portEXIT_CRITICAL(&radioLock);
-  if (overflow) { xQueueReset(inbox); sensor->overflow(); }
+  if (overflow && inbox) { xQueueReset(inbox); sensor->overflow(); }
   Input input;
   while (inbox && xQueueReceive(inbox,&input,0)==pdTRUE) {
     if (input.edge) {
@@ -109,7 +110,7 @@ void loop() {
   if (sensor->result(now,result) && (result.attempt!=resultAttempt || now-lastResult>=500000)) {
     if (transmit(result)) {
       if (result.attempt!=resultAttempt && Serial.availableForWrite()>80)
-        Serial.printf("FN-1 attempt=%lu elapsed_us=%llu (unvalidated)\n",(unsigned long)result.attempt,(unsigned long long)result.value);
+        Serial.printf("FN-%u attempt=%lu elapsed_us=%llu (unvalidated)\n",unsigned(JNS_LANE),(unsigned long)result.attempt,(unsigned long long)result.value);
       resultAttempt=result.attempt; lastResult=now;
     }
   }

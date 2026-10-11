@@ -6,15 +6,17 @@
 #include <lanetime/timebase.hpp>
 namespace jns {
 enum class FinishState { Idle, Armed, Cued, Running, Complete, Stopped, Invalid };
-// FN-1 only: lane-one START comes from the bound ST-1, never another start post.
+// Lane one accepts START from ST-1; lanes 2–4 bind their matching external start post.
 // Single-owner logic; interrupt/radio callbacks must queue events to its owner.
 class FinishSensor {
  public:
-  FinishSensor(uint32_t system,uint32_t boot):system_(system),boot_(boot) {}
+  FinishSensor(uint32_t system,uint32_t boot,uint8_t lane=1):system_(system),boot_(boot),lane_(lane) {
+    if (lane<1 || lane>4) hardwareFault();
+  }
   FinishState state() const { return state_; }
   uint64_t elapsed() const { return elapsed_; }
   bool clear(uint64_t now) const { return beam_.clear(now); }
-  bool ready(uint64_t now) const { return !locked_ && online_ && clock_.ready(now) && clear(now); }
+  bool ready(uint64_t now) const { return !locked_ && online_ && clock_.ready(now) && clear(now) && startReady(now); }
   void hardwareFault() { locked_=true; invalidate(); }
   void overflow() { hardwareFault(); } // Lost edges/control messages cannot be reconstructed.
   void edge(bool broken,uint64_t at) {
@@ -27,7 +29,7 @@ class FinishSensor {
       online_=false; clock_=Timebase(); invalidate();
     }
     if (!adopted()) return;
-    if (!clock_.ready(now)) { invalidate(); return; }
+    if (!clock_.ready(now) || (lane_>1 && !startFresh(now))) { invalidate(); return; }
     if (!sealed_ && state_!=FinishState::Complete && now-armLocal_>30000000) { invalidate(); return; }
     if (sealed_ || !haveStart_ || state_==FinishState::Complete) return;
     uint64_t remoteNow=0; clock_.toRemote(now,remoteNow);
@@ -46,8 +48,11 @@ class FinishSensor {
   // p has already passed shared decode(). at is the receive callback timestamp.
   void receive(const uint8_t* mac,const Packet& p,uint64_t at) {
     if (locked_ || p.system!=system_ || !p.boot) return;
-    // A second FN-1 cannot safely share this set, even before adopting a session.
-    if (p.role==Role::Finish && p.lane==1 && p.kind==Kind::Status) { hardwareFault(); return; }
+    // A second finish post claiming this lane cannot safely share the set.
+    if (p.role==Role::Finish && p.lane==lane_ && p.kind==Kind::Status) { hardwareFault(); return; }
+    if (lane_>1 && p.role==Role::Start && p.lane==lane_) {
+      externalStart(mac,p,at); return;
+    }
     if (p.role!=Role::Controller || p.lane!=1 || !p.session) return;
     if (!bound_) {
       if (p.kind!=Kind::Status) return;
@@ -63,6 +68,7 @@ class FinishSensor {
         if (retiredCount_==8) { hardwareFault(); return; }
         retiredSessions_[retiredCount_++]=session_;
       }
+      startKnown_=false;
       session_=p.session; controllerBoot_=p.boot; clock_=Timebase(); online_=false; lastRemote_=0;
       // Retire the attempt already in progress at discovery/reboot; never resume it.
       attempt_=p.attempt; mode_=p.mode; mask_=p.mask; resetAttempt(); state_=FinishState::Idle;
@@ -87,7 +93,7 @@ class FinishSensor {
       if (!p.attempt || p.attempt<=attempt_) return;
       // Consume this attempt even if not ready; duplicates cannot reopen a rejected arm.
       attempt_=p.attempt; mode_=p.mode; mask_=p.mask; resetAttempt();
-      if (!(mask_&1) || !ready(at)) { invalidate(); return; }
+      if (!(mask_&laneBit()) || !ready(at)) { invalidate(); return; }
       armLocal_=at; clock_.toRemote(at,armRemote_); state_=FinishState::Armed; return;
     }
     if (p.attempt!=attempt_ || p.mode!=mode_ || p.mask!=mask_ || !adopted()) return;
@@ -96,25 +102,16 @@ class FinishSensor {
       sealed_=true; count_=0;
       // Preserve Armed acknowledgement through ST-1's reveal lead-in without inventing a Result.
       if (state_!=FinishState::Complete) state_=FinishState::Stopped;
-      if (!(p.finishedMask&1)) elapsed_=0;
+      if (!(p.finishedMask&laneBit())) elapsed_=0;
       return;
     }
     if (sealed_ || state_==FinishState::Complete) return;
-    if ((mode_==Mode::Flying && p.kind==Kind::Start) || (mode_==Mode::Standing && p.kind==Kind::Go)) {
-      if (haveStart_) return; // First timestamp is immutable, including conflicting retries.
-      uint64_t remoteNow=0;
-      if (!clock_.ready(at) || !clock_.toRemote(at,remoteNow) || p.value<armRemote_ || !p.value) {
-        invalidate(); return;
-      }
-      if (mode_==Mode::Standing && (p.value<=remoteNow || p.value-remoteNow>5000000)) { invalidate(); return; }
-      // ST-1 START is direct; allow the provisional one-way sync bias (up to 10 ms).
-      if (mode_==Mode::Flying && p.value>remoteNow && p.value-remoteNow>10000) { invalidate(); return; }
-      haveStart_=true; startRemote_=p.value;
-      state_=mode_==Mode::Standing?FinishState::Cued:FinishState::Running;
-    }
+    if ((lane_==1 && mode_==Mode::Flying && p.kind==Kind::Start) ||
+        (mode_==Mode::Standing && p.kind==Kind::Go)) acceptStart(p,at);
   }
+
   Packet status(uint64_t now) const {
-    Packet p; p.role=Role::Finish; p.system=system_; p.boot=boot_; p.session=session_;
+    Packet p; p.role=Role::Finish; p.lane=lane_; p.system=system_; p.boot=boot_; p.session=session_;
     p.attempt=attempt_; p.mode=mode_; p.mask=mask_;
     if (ready(now)) p.flags|=jns::Ready;
     if (adopted()) p.flags|=jns::Armed;
@@ -132,6 +129,48 @@ class FinishSensor {
     p=status(now); p.kind=Kind::Result; p.value=elapsed_; return true;
   }
  private:
+  uint8_t laneBit() const { return uint8_t(1U<<(lane_-1)); }
+  bool startFresh(uint64_t now) const {
+    return startKnown_ && (now<=startSeen_ || now-startSeen_<=3000000);
+  }
+  bool startReady(uint64_t now) const {
+    return lane_==1 || (startFresh(now) && startStatus_.session==session_ &&
+      startStatus_.mode==mode_ && startStatus_.mask==mask_ &&
+      (startStatus_.flags&jns::Ready) && !(startStatus_.flags&jns::Fault));
+  }
+  void externalStart(const uint8_t* mac,const Packet& p,uint64_t at) {
+    if (!session_ || p.session!=session_ || !online_) return;
+    if (p.kind==Kind::Status) {
+      // A fresh second identity is a conflict, not a replacement post.
+      if (startKnown_ && memcmp(startMac_,mac,6) && (adopted() || startFresh(at))) {
+        hardwareFault(); return;
+      }
+      if (adopted() && startKnown_ && p.boot!=startStatus_.boot) { invalidate(); return; }
+      if (adopted() && p.attempt<attempt_) return; // Delayed status cannot refresh the peer.
+      if (adopted() && (p.attempt!=attempt_ || p.mode!=mode_ || p.mask!=mask_ || (p.flags&jns::Fault))) {
+        invalidate(); return;
+      }
+      memcpy(startMac_,mac,6); startStatus_=p; startSeen_=at; startKnown_=true;
+      return;
+    }
+    if (p.kind!=Kind::Start || mode_!=Mode::Flying || !adopted() || sealed_ ||
+        !startFresh(at) || memcmp(startMac_,mac,6) || p.boot!=startStatus_.boot ||
+        p.attempt!=attempt_ || p.mode!=mode_ || p.mask!=mask_ ||
+        startStatus_.attempt!=attempt_ || !(startStatus_.flags&jns::Armed) ||
+        (startStatus_.flags&jns::Fault)) return;
+    acceptStart(p,at);
+  }
+  void acceptStart(const Packet& p,uint64_t at) {
+    if (haveStart_ || sealed_ || state_==FinishState::Complete) return;
+    uint64_t remoteNow=0;
+    if (!clock_.ready(at) || !clock_.toRemote(at,remoteNow) || p.value<armRemote_ ||
+        !p.value || at-armLocal_>30000000) { invalidate(); return; }
+    if (mode_==Mode::Standing && (p.value<=remoteNow || p.value-remoteNow>5000000)) { invalidate(); return; }
+    // Provisional 10 ms allowance for one-way timebase bias, not an accuracy claim.
+    if (mode_==Mode::Flying && p.value>remoteNow && p.value-remoteNow>10000) { invalidate(); return; }
+    haveStart_=true; startRemote_=p.value;
+    state_=mode_==Mode::Standing?FinishState::Cued:FinishState::Running;
+  }
   bool adopted() const { return state_==FinishState::Armed || state_==FinishState::Cued ||
       state_==FinishState::Running || state_==FinishState::Complete || state_==FinishState::Stopped; }
   void resetAttempt() { haveStart_=sealed_=false; count_=0; elapsed_=startRemote_=0; }
@@ -142,10 +181,11 @@ class FinishSensor {
     breaks_[count_++]=at;
   }
   uint32_t system_,boot_,controllerBoot_=0,attempt_=0;
-  uint8_t controller_[6]={},mask_=1,count_=0,retiredCount_=0;
+  Packet startStatus_;
+  uint8_t lane_,startMac_[6]={},controller_[6]={},mask_=1,count_=0,retiredCount_=0;
   uint64_t session_=0,retiredSessions_[8]={},lastStatus_=0,lastRemote_=0,armLocal_=0,armRemote_=0,
-      startRemote_=0,elapsed_=0,breaks_[8]={};
-  bool bound_=false,online_=false,locked_=false,haveStart_=false,sealed_=false;
+      startRemote_=0,elapsed_=0,startSeen_=0,breaks_[8]={};
+  bool startKnown_=false,bound_=false,online_=false,locked_=false,haveStart_=false,sealed_=false;
   Mode mode_=Mode::Flying;
   FinishState state_=FinishState::Idle;
   Timebase clock_;
