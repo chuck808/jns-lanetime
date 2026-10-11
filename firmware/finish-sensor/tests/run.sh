@@ -7,3 +7,9 @@ mkdir -p build
   -Iinclude -I../shared/include -I../controller/include -I../lane-display/include \
   tests/test_finish.cpp -o build/test_finish -lm
 ./build/test_finish
+
+"${CXX:-g++}" -std=c++11 -Wall -Wextra -Werror -pedantic \
+  -fsanitize=undefined -fno-omit-frame-pointer \
+  -Iinclude -I../shared/include -I../controller/include -I../lane-display/include -I../start-sensor/include \
+  tests/test_multilane.cpp -o build/test_multilane -lm
+./build/test_multilane

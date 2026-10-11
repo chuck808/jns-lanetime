@@ -1,6 +1,6 @@
 # Lane result display prototype
 
-Receive-only ESP-NOW result display for LN-1 through LN-4, with an ESP32-C3 and a four-module MAX7219 32×8 FC16 matrix. This is a buildable prototype, not validated hardware. It depends on the ST-1 scheduled Reveal implementation; start/finish sensor firmware is still outstanding.
+Receive-only ESP-NOW result display for LN-1 through LN-4, with an ESP32-C3 or M5Stamp-S3 and a four-module MAX7219 32×8 FC16 matrix. This is a buildable prototype, not validated hardware. It depends on the ST-1 scheduled Reveal implementation; FN-1–FN-4 and ST-2–ST-4 prototypes are available.
 
 `include/lane_display.hpp` is hardware-independent state logic using the shared wire decoder/timebase. `src/main.cpp` provides the C3 radio and matrix adapter. Alternative digit hardware can replace the adapter without changing result handling.
 
@@ -17,9 +17,11 @@ pio device monitor -d firmware/lane-display -b 115200
 | Environment | Behaviour |
 | --- | --- |
 | `c3_lane1`–`c3_lane4` | Live ESP-NOW, lane fixed at build time |
-| `c3_bench` | Isolated static-pattern cycle, Wi-Fi off |
+| `c3_bench` | Isolated C3 static-pattern cycle, Wi-Fi off |
+| `stamp_s3_lane1`–`stamp_s3_lane4` | M5Stamp-S3 + GroveBreakOut, live ESP-NOW, lane fixed at build time |
+| `stamp_s3_bench` | M5Stamp-S3 static-pattern cycle, Wi-Fi off |
 
-The reference board is **Espressif ESP32-C3-DevKitM-1**, not an arbitrary C3 SuperMini or S3 board. Check the board, pinout and USB/upload arrangement before flashing. The final lane switch remains deferred: this prototype follows the existing target's build-time lane assignment. Restart/reflash to change the lane. System ID and radio channel must match ST-1; defaults match the controller prototype. The system ID prevents accidental mixing, not impersonation.
+The `c3_*` reference board is **Espressif ESP32-C3-DevKitM-1**; the `stamp_s3_*` builds explicitly select **M5Stack Stamp-S3** (`m5stack-stamps3`), not an arbitrary C3 SuperMini or S3 board. Check the board, pinout and USB/upload arrangement before flashing. The final lane switch remains deferred: this prototype follows the existing target's build-time lane assignment. Restart/reflash to change the lane. System ID and radio channel must match ST-1; defaults match the controller prototype. The system ID prevents accidental mixing, not impersonation.
 
 ## Prototype wiring
 
@@ -36,6 +38,41 @@ Use a 5 V-powered 74AHCT125 or equivalent TTL-input buffer; enable its used chan
 The MAX7219's guaranteed input-high threshold is 3.5 V, so direct ESP32 GPIO drive at 3.3 V is not guaranteed. Power capacity, decoupling, brightness, battery life and outdoor readability still need measurement. `JNS_MATRIX_INTENSITY` is 0–15 (default 4). `FC16_HW` is selected in the adapter: check actual panel orientation/type before use.
 
 References: [C3 board guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/esp32-c3-devkitm-1/user_guide.html), [MAX7219 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max7219-max7221.pdf), [MD_MAX72XX](https://github.com/MajicDesigns/MD_MAX72XX).
+
+## M5Stamp-S3 + GroveBreakOut
+
+These environments use the builder's working PlatformIO board/platform settings, USB CDC flags and software-SPI wiring:
+
+| Matrix input | Breakout connection |
+| --- | --- |
+| VCC | P2 pin 7, VIN_5V |
+| GND | P2 pin 6, GND |
+| DIN | P2 pin 5, G9 |
+| CS / LOAD | P2 pin 4, G7 |
+| CLK | P2 pin 3, G5 |
+
+The finished-unit level shifting and power considerations above still apply. Stamp-S3 brightness defaults to **10**, matching the original working test sketch; edit `JNS_MATRIX_INTENSITY` in `[stamp_s3]` for 0–15. C3 brightness and pins retain their existing defaults.
+
+In VS Code, open `firmware/lane-display` as the PlatformIO project. Under **Project Tasks**, choose **stamp_s3_bench → General → Upload** first. Alternatively, from the repository root:
+
+```sh
+pio run -d firmware/lane-display -e stamp_s3_bench -t upload
+pio device monitor -d firmware/lane-display -b 115200
+```
+
+This runs the existing radio-free demo using the project's actual font: TEST, 1.750, 12.345, 30.000, DNF, ERR and ----, three seconds each at fixed brightness. It differs from the separate brightness-sweep sketch. No serial connection is required for battery operation.
+
+For live lane 1, select **stamp_s3_lane1** and upload, or run:
+
+```sh
+pio run -d firmware/lane-display -e stamp_s3_lane1 -t upload
+```
+
+Use the corresponding environment for lanes 2–4. The project's default remains `c3_lane1`, so explicitly select the Stamp-S3 environment before uploading. Live firmware shows `----` until controller contact; it will not generate sample results. ST-1 and the finish sensor must share the system ID/channel. The MagTag can remain absent while using `stamp_s3_bench`.
+
+The same state machine and renderer serve both board families. MD_Parola is unnecessary here: the firmware draws through pinned MD_MAX72XX directly, including its compact numerical font. The builder has confirmed the separate Parola readability sketch on USB-C and battery behind smoked acrylic; that does not yet validate this firmware's font, radio, synchronisation or physical reveal timing. Check those with the bench and live builds respectively.
+
+Breakout reference: [M5Stack Stamp-S3 GroveBreakOut](https://docs.m5stack.com/en/accessory/Stamp-S3_GroveBreakOut).
 
 ## What it displays
 
@@ -71,6 +108,7 @@ Broadcast delivery is not guaranteed. At least one valid Reveal must arrive befo
 ```sh
 sh firmware/lane-display/tests/run.sh
 pio run -d firmware/lane-display -e c3_lane1 -e c3_lane2 -e c3_lane3 -e c3_lane4 -e c3_bench
+pio run -d firmware/lane-display -e stamp_s3_lane1 -e stamp_s3_lane2 -e stamp_s3_lane3 -e stamp_s3_lane4 -e stamp_s3_bench
 ```
 
 Native tests cover lane/system/session/attempt filtering, finish identity, duplicate messages, controller reboot, cancellation, expiry, missing Results versus DNF, reveal scheduling, faults and number formatting. A wire-encoded simulation feeds four displays with different local clock offsets and different surviving Reveal copies; it checks common reveal timing and separate missing-data/DNF states. This does not model or validate real radio/sensor latency.
