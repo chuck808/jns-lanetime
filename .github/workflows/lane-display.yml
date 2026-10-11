@@ -17,4 +17,4 @@ jobs:
       - run: pip install platformio==6.2.0
       - run: sh firmware/shared/tests/run.sh
       - run: sh firmware/lane-display/tests/run.sh
-      - run: pio run -d firmware/lane-display -e c3_lane1 -e c3_lane2 -e c3_lane3 -e c3_lane4 -e c3_bench
+      - run: pio run -d firmware/lane-display -e c3_lane1 -e c3_lane2 -e c3_lane3 -e c3_lane4 -e c3_bench -e stamp_s3_lane1 -e stamp_s3_lane2 -e stamp_s3_lane3 -e stamp_s3_lane4 -e stamp_s3_bench
