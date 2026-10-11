@@ -6,6 +6,8 @@
 #include <lanetime/timebase.hpp>
 namespace jns {
 enum class FinishState { Idle, Armed, Cued, Running, Complete, Stopped, Invalid };
+// Provisional: quiet gap that ends one rider's burst of breaks. Measure on real bikes.
+constexpr uint64_t kBurstUs=500000;
 // Lane one accepts START from ST-1; lanes 2–4 bind their matching external start post.
 // Single-owner logic; interrupt/radio callbacks must queue events to its owner.
 class FinishSensor {
@@ -173,10 +175,15 @@ class FinishSensor {
   }
   bool adopted() const { return state_==FinishState::Armed || state_==FinishState::Cued ||
       state_==FinishState::Running || state_==FinishState::Complete || state_==FinishState::Stopped; }
-  void resetAttempt() { haveStart_=sealed_=false; count_=0; elapsed_=startRemote_=0; }
+  void resetAttempt() { haveStart_=sealed_=seenBreak_=false; count_=0; elapsed_=startRemote_=lastBreak_=0; }
   void invalidate() { resetAttempt(); state_=FinishState::Invalid; }
   void takeBreak() {
     uint64_t at=0; if (!beam_.take(at) || !adopted() || sealed_ || state_==FinishState::Complete || at<armLocal_) return;
+    // A hub-height beam sees tyre, spokes, hub, fork, frame, legs and rear wheel as separate
+    // breaks. Only the first break of a burst is a candidate; the burst ends after a quiet gap.
+    const bool burst=seenBreak_ && at-lastBreak_<kBurstUs;
+    lastBreak_=at; seenBreak_=true;
+    if (burst) return;
     if (count_==8) { invalidate(); return; }
     breaks_[count_++]=at;
   }
@@ -184,8 +191,8 @@ class FinishSensor {
   Packet startStatus_;
   uint8_t lane_,startMac_[6]={},controller_[6]={},mask_=1,count_=0,retiredCount_=0;
   uint64_t session_=0,retiredSessions_[8]={},lastStatus_=0,lastRemote_=0,armLocal_=0,armRemote_=0,
-      startRemote_=0,elapsed_=0,startSeen_=0,breaks_[8]={};
-  bool startKnown_=false,bound_=false,online_=false,locked_=false,haveStart_=false,sealed_=false;
+      startRemote_=0,elapsed_=0,startSeen_=0,lastBreak_=0,breaks_[8]={};
+  bool startKnown_=false,bound_=false,online_=false,locked_=false,haveStart_=false,sealed_=false,seenBreak_=false;
   Mode mode_=Mode::Flying;
   FinishState state_=FinishState::Idle;
   Timebase clock_;

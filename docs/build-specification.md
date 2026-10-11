@@ -181,7 +181,7 @@ The cue sequence and lead-in are provisional bench values. No automatic early-st
 
 ### 5.4 Finish sensor behaviour — Specified
 
-**Which break counts.** After ARM, once the beam has a qualified clear, record every qualified break as a local timestamp in a small ring buffer (about eight entries). The finish is the **first recorded break later than the start time**, compared in ST-1 time. This one rule covers the normal case, a late-arriving START (finish already recorded), and stray breaks before the start such as a coach walking through. Later breaks from the same rider's frame, body or rear wheel never replace it.
+**Which break counts.** After ARM, once the beam has a qualified clear, record the first qualified break of each burst as a local timestamp in a small ring buffer (about eight entries). At wheel-centre height one rider breaks the beam many times (tyre, spokes, hub, fork, frame, legs, rear wheel); a burst ends after a quiet gap, provisionally 0.5 s, to be confirmed on real bikes. The finish is the **first recorded break later than the start time**, compared in ST-1 time. This one rule covers the normal case, a late-arriving START (finish already recorded), and stray breaks before the start such as a coach walking through. Later breaks from the same rider's frame, body or rear wheel never replace it.
 
 **State machine.**
 

@@ -41,6 +41,19 @@ void flyingAndLateStart() {
     assert(x.result().value==1750000);
   }
 }
+// A hub-height beam: tyre leading edge, then spokes, hub, frame, legs and rear wheel give
+// 40 qualified breaks in 0.3 s. The leading edge is the finish, with START early or late.
+void wheelPassage() {
+  for (bool late:{false,true}) {
+    Fixture x; x.warm(); x.arm(); const uint64_t start=x.t+100000;
+    if (!late) { x.t=start; x.start(); }
+    const uint64_t finish=start+1750000;
+    for (int i=0;i<40;++i) x.pulse(finish+i*7500,i?300:7000);
+    if (late) x.start(start);
+    while (x.t<start+5000000) x.advance();
+    assert(x.f.state()==FinishState::Complete && x.result().value==1750000);
+  }
+}
 void standingAndStrays() {
   Fixture x; x.warm(); x.arm(Mode::Standing); const uint64_t go=x.t+4000000;
   x.start(go); assert(x.f.state()==FinishState::Cued);
@@ -62,7 +75,8 @@ void invalidationAndRecovery() {
     assert(x.f.state()==FinishState::Invalid); }
   { Fixture x; x.warm(); x.arm(); for (int i=0;i<61;++i) x.advance();
     assert(x.f.state()==FinishState::Invalid); }
-  { Fixture x; x.warm(); x.arm(); for (int i=0;i<9;++i) x.pulse(x.t+100000+i*100000);
+  // Nine separate bursts (quiet gaps longer than kBurstUs) with no START overflow the buffer.
+  { Fixture x; x.warm(); x.arm(); for (int i=0;i<9;++i) x.pulse(x.t+600000);
     assert(x.f.state()==FinishState::Invalid); }
   { Fixture x; x.warm(); x.arm(); x.f.overflow(); x.c.kind=Kind::Cancel;
     x.f.receive(controlMac,x.c,x.t+offset); assert(!x.f.ready(x.t+offset)); }
@@ -146,6 +160,6 @@ void endToEnd() {
   assert(display.state()==DisplayState::Time && display.elapsed()==1750000);
 }
 int main() {
-  flyingAndLateStart(); standingAndStrays(); invalidationAndRecovery(); filtersAndReboots();
+  flyingAndLateStart(); wheelPassage(); standingAndStrays(); invalidationAndRecovery(); filtersAndReboots();
   beamAndReveal(); endToEnd(); puts("All FN-1 tests passed");
 }
