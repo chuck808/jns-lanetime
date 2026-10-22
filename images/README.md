@@ -47,3 +47,13 @@ Three screens explore the future coach interface: session setup, armed/start con
 This is a visual concept, not an implemented mobile app or a change to the current physical-controller baseline. Connection indicators and times are illustrative; three decimal places do not establish timing accuracy. Phone/browser control remains deferred.
 
 ![Mobile interface: setup, armed and results](mobile-interface-concept.png)
+
+## RFID lane check-in scanner
+
+Standalone battery-powered ESP32/RFID concept, with one reader assigned to each lane a few metres before the start. Riders tap their club-issued tag before every run in free-ride, coached flying-start and coached static-start sessions. The case follows the existing silver-grey shell, charcoal face, recessed corner screws, red power button and tripod-mount styling. A nonmetallic tap panel, lane label, status LED and buzzer provide a simple screen-free interface. The same design serves lanes 1–4.
+
+Proposed feedback: amber while registration is pending; green plus one short beep only after ST-1 acknowledges the rider/lane assignment; red plus two short beeps on rejection. Green means checked in, not permission to start. Coach-led sessions still await the coach; free-ride would use a separate lane-ready indication at the start post.
+
+This is a visual concept, not implemented RFID firmware or a manufacturing drawing. RFID/tag standard, antenna clearance, reader hardware, battery, dimensions, mounting and weather protection remain to be selected or tested. Reader electronics and antennas must work through the enclosure materials. Free-ride and rider-history integration are future work.
+
+![RFID lane reader: front and rear concept views with rider tag](rfid-lane-reader.png)
