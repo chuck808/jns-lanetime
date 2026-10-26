@@ -2,6 +2,8 @@
 
 **Draft for implementation · Revision 4 · 4 October 2026**
 
+**26 October planning note:** The [RFID, session modes and results working design](rfid-sessions-and-results.md) extends this baseline with fresh rider check-in before every run, rider-linked records and independent free-ride operation. The no-rider-profiles scope and group-only lifecycle below describe the existing baseline; the new document separates agreed extension behaviour from proposed implementation and open choices. These extensions are not yet implemented.
+
 **29 September prototype note:** The first [ST-1 firmware](../firmware/controller/README.md) selects the Adafruit MagTag (ESP32-S2), its front buttons/eInk/LEDs/speaker, D10 IR drive and A1/GPIO18 TSSP77038 reception at 3.3 V. ST-1 has TX and RX for Flying mode and no passive reflector. The controller README records provisional group arm, the scheduled Standing countdown, 30-second group deadline, beam qualification and wire contract choices. These are bench defaults, not measured performance requirements. Revision 3 replaces arrival-time starts with a common ST-1 timebase (§5) and moves the Standing cue onto every start post (§5.3); ST-1 firmware and the wire contract follow it. Revision 4 records the agreed finish-sensor and reveal methods (§5.1, §5.4, §8.1). ST-1 now implements scheduled Reveal and hold-to-reveal; other device firmware and timing validation remain outstanding; system-wide open choices below still apply.
 
 ## 1. Status and scope

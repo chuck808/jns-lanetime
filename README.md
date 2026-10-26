@@ -9,7 +9,7 @@ Club sprint training over short distances (around 30 m or less). Up to four ride
 - **Flying:** riders roll in at speed. Each lane's clock starts when its rider breaks the start beam and stops at the finish beam.
 - **Standing:** riders start from a standstill on a shared countdown. Every start post sounds the same cue at the same instant, and every lane's clock starts at GO.
 
-It was built for a local club as an affordable, quick-to-deploy alternative to commercial multi-lane timing systems. It has no subscription, no rider profiles, no phone pairing and no per-session configuration: each unit is built with its lane and role fixed.
+It was built for a local club as an affordable, quick-to-deploy alternative to commercial multi-lane timing systems, with no subscription. The current timing prototype has no rider profiles or phone pairing; ordinary sensors use fixed lane and role identities. RFID check-in, rider-linked session records and independent free-ride operation are planned extensions.
 
 ## How it is laid out
 
@@ -50,6 +50,7 @@ The first build can use development boards with integrated screens and buttons, 
 ## Further reading
 
 - The [build specification](docs/build-specification.md) records agreed requirements, proposals and open choices.
+- The [RFID, session modes and results working design](docs/rfid-sessions-and-results.md) records the planned extension and outstanding decisions.
 - The [firmware overview](firmware/README.md) maps devices to targets.
 - The [mock-up gallery](images/README.md) records the current physical design direction.
 
