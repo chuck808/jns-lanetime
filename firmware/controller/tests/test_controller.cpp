@@ -26,7 +26,7 @@ void protocol() {
   b[7]=5; assert(!decode(b,sizeof(b),q)); b[7]=1;
   b[5]=uint8_t(Kind::Go); assert(!decode(b,sizeof(b),q));
   b[5]=uint8_t(Kind::Result); b[26]=jns::Complete|jns::Cued; assert(decode(b,sizeof(b),q));
-  b[26]=64; assert(!decode(b,sizeof(b),q));
+  b[26]=128; assert(!decode(b,sizeof(b),q));
 }
 void flying() {
   Controller c(42,99); assert(!c.arm(t,true));
@@ -215,7 +215,16 @@ void holdGesture() {
   b.update(true,10200000,false); b.update(true,10300000,true);
   assert(!b.held(12000000)); // Leaving Running disarms the gesture until another press.
 }
+void retirementProtocol() {
+  Packet p; p.boot=7; p.kind=Kind::Status; p.flags=jns::Retired;
+  uint8_t b[kPacketSize]; Packet out; encode(p,b); assert(decode(b,sizeof(b),out));
+  b[4]=2; assert(!decode(b,sizeof(b),out)); // Upgrade the entire installation.
+  p.flags|=jns::Armed; encode(p,b); assert(!decode(b,sizeof(b),out));
+  p.flags=jns::Retired; p.role=Role::Finish; encode(p,b); assert(!decode(b,sizeof(b),out));
+  p.role=Role::Controller; p.kind=Kind::Arm; encode(p,b); assert(!decode(b,sizeof(b),out));
+}
 int main() {
+  retirementProtocol();
   protocol(); flying(); standing(); faults(); multilane(); optics();
   revealProtocol(); manualReveal(); revealBoundaries(); revealFaults(); holdGesture();
   puts("All controller tests passed");

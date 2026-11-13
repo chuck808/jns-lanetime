@@ -11,7 +11,7 @@ Edges are paired by time, not sequence number, so a missed edge cannot shift pai
   A-B    the sync error between units: the figure that matters for results,
          because start and finish come from different units.
   A-ST1  unit vs truth: includes the minimum radio delay, a bias that cancels
-         in A-B and in elapsed times. Its spread still matters.
+         in A-B only when link delays match. Direct ST-1 starts/GO retain it.
 """
 import statistics
 import sys

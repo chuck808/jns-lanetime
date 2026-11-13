@@ -44,8 +44,8 @@ void perfectLink() {
   const double te=kT0+9.3e6;
   double t=feed(tb,u,r,link,kT0,te);
   assert(!tb.interpolable(u.local(te)));               // No block minimum after the event yet.
-  feed(tb,u,r,link,t,t+kTbBlockSamples*kStep);
-  // Constant one-way delay biases every unit equally; it cancels in elapsed times.
+  feed(tb,u,r,link,t,t+2*kTbBlockSamples*kStep);
+  // This fixture has equal delay. Bias only cancels between equally delayed units.
   assert(fabs(converted(tb,u,te)-(te-link.base))<40);
   uint64_t back=0, rem=0; assert(tb.toRemote(u.local(te),rem) && tb.toLocal(rem,back));
   assert(llabs(int64_t(back)-int64_t(u.local(te)))<=1);
@@ -56,7 +56,7 @@ void twoUnitSync() {
   Timebase ta, tb; double worst=0;
   for (int k=0;k<60;++k) {
     const double te=kT0+2e7+k*1.37e6;                  // Events every 1.37 s over ~80 s.
-    const double from=k?te-1.37e6+3e6:kT0, end=te+3e6;
+    const double from=k?te-1.37e6+8e6:kT0, end=te+8e6;
     const double lastA=feed(ta,a,ra,link,from,end)-kStep, lastB=feed(tb,b,rb,link,from,end)-kStep;
     if (k<2) continue;
     assert(ta.ready(a.local(lastA)) && tb.ready(b.local(lastB)));
@@ -72,7 +72,7 @@ void delayedBlocksRejected() {
     for (int i=0;i<kTbBlockSamples;++i,t+=kStep)
       tb.sample(kSession,u.local(t+good.delay(r)+(block%3==1?3000:0)),uint64_t(t));
   assert(tb.ready(u.local(t)) && tb.kept()<kTbBlocks && tb.spread()<kTbSpreadUs);
-  const double te=t-3*kStep; assert(fabs(converted(tb,u,te)-(te-good.base))<40);
+  const double te=t-5*kStep; assert(fabs(converted(tb,u,te)-(te-good.base))<40);
 }
 void resets() {
   Timebase tb; Unit u{0,1e9}; Rng r{6}; Link link; link.pDelayed=0;
@@ -85,7 +85,41 @@ void resets() {
   Timebase empty; uint64_t x=0; assert(!empty.toRemote(1,x) && !empty.toLocal(1,x) && !empty.interpolable(0));
 }
 
+void retainedBracketingAndCalibration() {
+  Timebase raw, calibrated(800);
+  for (int i=0;i<20;++i) {
+    const uint64_t r=10000000+i*500000;
+    const uint64_t local=r+1000000+800+(i%4?1:0);
+    raw.sample(77,local,r); calibrated.sample(77,local,r);
+  }
+  assert(!raw.interpolable(20000000)); // Closing sample is after event, retained minimum before.
+  assert(!raw.interpolable(10000000)); // Event predates the fit.
+  uint64_t uncorrected=0, corrected=0, back=0;
+  assert(raw.toRemote(18000000,uncorrected));
+  assert(calibrated.toRemote(18000000,corrected));
+  assert(corrected==17000000 && uncorrected==16999200);
+  assert(calibrated.toLocal(corrected,back) && back==18000000);
+  for (int i=20;i<24;++i) {
+    const uint64_t r=10000000+i*500000;
+    raw.sample(77,r+1000000+800+(i%4?1:0),r);
+  }
+  assert(raw.interpolable(20000000));
+  Timebase rejected;
+  for (int i=0;i<36;++i) {
+    const uint64_t r=10000000+i*500000;
+    rejected.sample(77,r+1000000+800+(i>=32?3000:0),r);
+  }
+  assert(rejected.kept()<kTbBlocks);
+  assert(!rejected.interpolable(27000000)); // Rejected newer point cannot bracket an event.
+  // A controller reboot clears history, not the measured correction.
+  for (int i=0;i<24;++i) {
+    const uint64_t r=30000000+i*500000;
+    calibrated.sample(88,r+1000000+800,r);
+  }
+  assert(calibrated.toRemote(39000000,corrected) && corrected==38000000);
+}
 int main() {
+  retainedBracketingAndCalibration();
   readiness(); perfectLink(); twoUnitSync(); delayedBlocksRejected(); resets();
   puts("All timebase tests passed");
 }

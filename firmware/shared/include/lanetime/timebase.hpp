@@ -6,6 +6,11 @@
 #include <math.h>
 #include <stdint.h>
 
+#ifndef JNS_TIMEBASE_DELAY_US
+#define JNS_TIMEBASE_DELAY_US 0
+#endif
+static_assert(JNS_TIMEBASE_DELAY_US>=0 && JNS_TIMEBASE_DELAY_US<=100000, "Invalid measured timebase delay");
+
 namespace jns {
 
 // Provisional values; the bench sync test (§9) replaces the thresholds.
@@ -19,6 +24,8 @@ constexpr double kTbSpreadUs=100;         // RMS residual allowed for Ready
 
 class Timebase {
  public:
+  // Measured minimum one-way heartbeat delay in ST-1 microseconds; zero means uncalibrated.
+  explicit Timebase(uint32_t delayUs=JNS_TIMEBASE_DELAY_US):delayUs_(delayUs) {}
   // Record one ST-1 heartbeat: local = receive-callback time, remote = ST-1
   // clock carried in the packet. A new ST-1 session discards all history.
   void sample(uint64_t session,uint64_t local,uint64_t remote) {
@@ -29,25 +36,24 @@ class Timebase {
     if (++inBlock_==kTbBlockSamples) {
       points_[next_]=blockMin_; next_=(next_+1)%kTbBlocks;
       if (stored_<kTbBlocks) ++stored_;
-      inBlock_=0; closed_=local; fit();
+      inBlock_=0; fit();
     }
   }
   bool ready(uint64_t now) const {
     // A sample stamped after `now` (callback raced the loop's clock read) counts as fresh.
     return fitted_ && count_ && (now<=last_ || now-last_<=kTbMaxAgeUs) && spread_<=kTbSpreadUs;
   }
-  // An event is converted by interpolation once a block that closed after it is in the fit,
-  // so the fit has data from both sides of the event.
-  bool interpolable(uint64_t local) const { return fitted_ && closed_>local; }
+  // Only retained, non-rejected samples count as interpolation endpoints.
+  bool interpolable(uint64_t local) const { return fitted_ && firstFit_<=local && lastFit_>local; }
   // Local → ST-1 time. Valid only when interpolable() (events) or ready() (scheduling).
   bool toRemote(uint64_t local,uint64_t& remote) const {
     if (!fitted_) return false;
-    remote=uint64_t(int64_t(local)-offsetAt(local)); return true;
+    remote=uint64_t(int64_t(local)-offsetAt(local)+delayUs_); return true;
   }
   // ST-1 → local time, for scheduling cues and reveals. Solves L = R + o(L).
   bool toLocal(uint64_t remote,uint64_t& local) const {
     if (!fitted_) return false;
-    const double d=double(int64_t(remote)-int64_t(ref_)+oRef_)+a_;
+    const double d=double(int64_t(remote)-delayUs_-int64_t(ref_)+oRef_)+a_;
     local=uint64_t(int64_t(ref_)+int64_t(::llround(d/(1.0-b_)))); return true;
   }
   uint64_t session() const { return session_; }
@@ -59,7 +65,7 @@ class Timebase {
   struct Point { uint64_t l; int64_t o; };
   void clear(uint64_t session) {
     session_=session; count_=inBlock_=stored_=next_=kept_=0; fitted_=false;
-    last_=closed_=ref_=0; oRef_=0; a_=b_=0; spread_=1e9;
+    last_=firstFit_=lastFit_=ref_=0; oRef_=0; a_=b_=0; spread_=1e9;
   }
   int64_t offsetAt(uint64_t local) const {
     return oRef_+int64_t(::llround(a_+b_*double(int64_t(local)-int64_t(ref_))));
@@ -78,6 +84,11 @@ class Timebase {
       for (uint8_t i=0;i<stored_;++i) if (residual(points_[i],a,b)>kTbRejectUs) keep[i]=false;
     }
     double sum=0; for (uint8_t i=0;i<stored_;++i) if (keep[i]) { const double r=residual(points_[i],a,b); sum+=r*r; }
+    firstFit_=UINT64_MAX; lastFit_=0;
+    for (uint8_t i=0;i<stored_;++i) if (keep[i]) {
+      if (points_[i].l<firstFit_) firstFit_=points_[i].l;
+      if (points_[i].l>lastFit_) lastFit_=points_[i].l;
+    }
     a_=a; b_=b; kept_=n; spread_=n?::sqrt(sum/n):1e9; fitted_=n>=kTbMinBlocks;
   }
   double x(const Point& p) const { return double(int64_t(p.l)-int64_t(ref_)); }
@@ -94,8 +105,9 @@ class Timebase {
     b=(n*sxy-sx*sy)/den; a=(sy-b*sx)/n; return true;
   }
 
+  uint32_t delayUs_;
   Point points_[kTbBlocks]={}, blockMin_={0,0};
-  uint64_t session_=0, last_=0, closed_=0, ref_=0;
+  uint64_t session_=0, last_=0, firstFit_=0, lastFit_=0, ref_=0;
   int64_t oRef_=0;
   double a_=0, b_=0, spread_=1e9;
   uint32_t count_=0;

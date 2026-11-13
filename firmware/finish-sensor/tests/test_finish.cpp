@@ -159,7 +159,17 @@ void endToEnd() {
   assert(delivered && controller.state==State::Complete && controller.results[0]==1750000);
   assert(display.state()==DisplayState::Time && display.elapsed()==1750000);
 }
+void retiredHeartbeat() {
+  Fixture x; x.warm(); x.arm(); x.start();
+  x.c.flags=jns::Retired; x.advance();
+  assert(x.f.state()==FinishState::Idle);
+  Packet p; assert(!x.f.result(x.t+offset,p));
+  x.c.kind=Kind::Arm; x.c.flags=0; x.f.receive(controlMac,x.c,x.t+offset);
+  assert(x.f.state()==FinishState::Idle);
+  x.arm(Mode::Flying,2);
+}
 int main() {
+  retiredHeartbeat();
   flyingAndLateStart(); wheelPassage(); standingAndStrays(); invalidationAndRecovery(); filtersAndReboots();
   beamAndReveal(); endToEnd(); puts("All FN-1 tests passed");
 }

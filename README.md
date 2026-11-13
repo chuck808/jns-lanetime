@@ -39,7 +39,9 @@ The result displays (LN-1 to LN-4) stand beyond the finish line, facing the ride
 
 ## Timing model
 
-ST-1's clock is the common timebase. Its 500 ms heartbeat carries its own timestamp, and every other unit continuously estimates its offset from it. Beam events and the Standing GO are exchanged as timestamps in that timebase, so radio latency, retries and late delivery do not affect a result. They only affect how soon it appears. Sync error, drift and sensing latency still need measuring; no timing accuracy is claimed yet.
+ST-1's clock is the common timebase. Its 500 ms heartbeat carries its own timestamp, and every other unit continuously estimates its offset from it. Beam events and the Standing GO are exchanged as timestamps in that timebase, so START/Result delivery time is not used as the measured event time. Heartbeat delay still biases clock estimation, and packet loss can invalidate an attempt. Sync error, drift and sensing latency still need measuring; no timing accuracy is claimed yet.
+
+**Firmware upgrade:** the baseline now uses wire version 3. Reflash controller, sensors, displays and bench boards together; mixed v2/v3 installations cannot arm. See [baseline hardening and calibration](docs/baseline-validation.md).
 
 ## Project status
 
@@ -61,4 +63,4 @@ The first build can use development boards with integrated screens and buttons, 
 | `images/` | Current device concept mock-ups |
 | `firmware/` | Five planned firmware targets and shared modules |
 
-ST-1 uses Arduino C++ and PlatformIO on the MagTag ESP32-S2. Native tests, the three controller builds, five C3 display builds, six finish-sensor builds and four external-start builds run in GitHub Actions. No dependency on JNS_Timing code. Cruiser bikes are excluded; phone control and a handheld remote are deferred.
+ST-1 uses Arduino C++ and PlatformIO on the MagTag ESP32-S2. Native tests, the three controller builds, ten C3/Stamp-S3 display builds, six finish-sensor builds and four external-start builds run in GitHub Actions. No dependency on JNS_Timing code. Cruiser bikes are excluded; phone control and a handheld remote are deferred.

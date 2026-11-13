@@ -81,6 +81,10 @@ class FinishSensor {
       if (online_ && at>=lastStatus_ && at-lastStatus_>3000000) { clock_=Timebase(); invalidate(); }
       lastRemote_=p.value; lastStatus_=at; online_=true; clock_.sample(session_,at,p.value);
       if (p.attempt<attempt_) return;
+      if (p.flags&jns::Retired) {
+        attempt_=p.attempt; invalidate(); state_=FinishState::Idle;
+        mode_=p.mode; mask_=p.mask; return;
+      }
       if ((p.flags&jns::Fault) && p.attempt>=attempt_) { attempt_=p.attempt; invalidate(); return; }
       if (adopted() && (p.attempt>attempt_ || p.mode!=mode_ || p.mask!=mask_)) invalidate();
       if (!adopted()) {

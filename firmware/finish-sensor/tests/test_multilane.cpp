@@ -27,6 +27,7 @@ struct Rig {
     if (c.state==State::Armed || c.state==State::Countdown || c.state==State::Running) p.flags|=jns::Armed;
     if (c.state==State::Running) p.flags|=jns::Running;
     if (c.state==State::Revealing || c.state==State::Complete) p.flags|=jns::Complete;
+    if (kind==Kind::Status && c.state==State::Idle && c.attempt) p.flags|=jns::Retired;
     if (c.state==State::Fault) p.flags|=jns::Fault;
     if (kind==Kind::Status) p.value=t;
     return p;
@@ -182,7 +183,24 @@ void externalIdentity() {
   }
 
 }
+void lostGroupCancel() {
+  for (Mode mode:{Mode::Flying,Mode::Standing}) {
+    Rig r(mode); r.warmArm();
+    if (mode==Mode::Standing) {
+      assert(r.c.countdown(r.t)); auto go=r.controllerPacket(Kind::Go); go.value=r.c.goAt;
+      r.broadcastController(go);
+    }
+    r.c.cancel(); // Deliberately do not broadcast CANCEL.
+    r.t+=500000; r.statuses();
+    for (auto& start:r.starts) assert(start.state()==StartState::Idle && !start.cuesActive());
+    for (auto& finish:r.finishes) assert(finish.state()==FinishState::Idle);
+    for (auto& display:r.displays) assert(display.state()==DisplayState::Unavailable);
+    assert(r.c.arm(r.t,true)); r.broadcastController(r.controllerPacket(Kind::Arm));
+    r.statuses(); r.c.tick(r.t,true); assert(r.c.state==State::Armed && r.c.attempt==2);
+  }
+}
 int main() {
+  lostGroupCancel();
   fourLanes(Mode::Flying); fourLanes(Mode::Standing);
   fourLanes(Mode::Flying,true); fourLanes(Mode::Standing,true);
   fourLanes(Mode::Flying,false,true); fourLanes(Mode::Flying,false,false,true);

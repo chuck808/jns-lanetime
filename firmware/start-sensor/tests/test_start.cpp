@@ -26,7 +26,7 @@ void flying() {
   for (uint8_t lane=2;lane<=4;++lane) {
     Fixture x(lane); x.warm(); x.arm(); x.t+=100000; const auto event=x.t; x.pulse();
     Packet p; assert(!x.s.start(x.t+offset,p)); // Wait for a closed timebase block.
-    for (int i=0;i<5;++i) x.advance();
+    for (int i=0;i<9;++i) x.advance();
     p=x.start(); assert(p.value==event && p.role==Role::Start && p.lane==lane);
     x.pulse(); x.advance(); assert(x.start().value==event); // Rear wheel cannot replace timestamp.
     auto f=x.finish(); x.send(f,finishMac); f.flags|=jns::Running;
@@ -34,7 +34,7 @@ void flying() {
     wrong=f; wrong.lane=1; x.send(wrong,finishMac); assert(x.start().value==event);
     x.send(f,finishMac); assert(!x.s.start(x.t+offset,p));
   }
-  Fixture x; x.warm(); x.arm(); x.pulse(100); for (int i=0;i<5;++i) x.advance();
+  Fixture x; x.warm(); x.arm(); x.pulse(100); for (int i=0;i<9;++i) x.advance();
   Packet p; assert(!x.s.start(x.t+offset,p));
 }
 void standing() {
@@ -119,10 +119,18 @@ void controllerIntegration(Mode mode) {
   } else {
     t+=100000; assert(c.localStart(t));
     for (auto s:starts) { s->t=t; s->pulse(); }
-    for (int i=0;i<5;++i) { t+=500000; exchange(); }
+    for (int i=0;i<9;++i) { t+=500000; exchange(); }
     for (auto s:starts) { auto p=s->start(); uint8_t mac[]={2,0,0,0,2,p.lane}; assert(c.observe(mac,p,t)); }
     assert(c.started==15 && c.state==State::Running);
   }
 }
-int main() { flying(); standing(); recoveryAndFiltering(); controllerIntegration(Mode::Flying);
+void retiredHeartbeat() {
+  Fixture x; x.warm(); x.arm(); x.pulse();
+  x.c.flags=jns::Retired; x.advance();
+  assert(x.s.state()==StartState::Idle);
+  x.c.kind=Kind::Arm; x.c.flags=0; x.send(x.c);
+  assert(x.s.state()==StartState::Idle); // A duplicate cannot reopen the retired attempt.
+  x.arm(Mode::Flying,2);
+}
+int main() { retiredHeartbeat(); flying(); standing(); recoveryAndFiltering(); controllerIntegration(Mode::Flying);
   controllerIntegration(Mode::Standing); puts("All external start-sensor tests passed"); }
