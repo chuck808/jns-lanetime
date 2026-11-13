@@ -70,7 +70,7 @@ class LaneDisplay {
         state_=(mask_&laneBit())?DisplayState::Pending:DisplayState::Disabled;
       }
       if (!attempt_) return;
-      if (p.kind==Kind::Cancel || (p.kind==Kind::Status && (p.flags&jns::Fault))) {
+      if (p.kind==Kind::Cancel || (p.kind==Kind::Status && (p.flags&(jns::Fault|jns::Retired)))) {
         invalidate(); return;
       }
       if (p.mode!=mode_ || p.mask!=mask_) { invalidate(); return; }

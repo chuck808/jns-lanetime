@@ -114,3 +114,7 @@ pio run -d firmware/lane-display -e stamp_s3_lane1 -e stamp_s3_lane2 -e stamp_s3
 Native tests cover lane/system/session/attempt filtering, finish identity, duplicate messages, controller reboot, cancellation, expiry, missing Results versus DNF, reveal scheduling, faults and number formatting. A wire-encoded simulation feeds four displays with different local clock offsets and different surviving Reveal copies; it checks common reveal timing and separate missing-data/DNF states. This does not model or validate real radio/sensor latency.
 
 Before track use: verify the bench font/orientation (especially decimal and `30.000`), level shifting, power stability and visibility. Then test with an actual controller/finish node, all four lanes, missed packets, reset during the lead-in and controller power loss. No hardware has been flashed or physically verified as part of this implementation.
+
+## Baseline v3 update
+
+Reflash the entire installation for protocol v3. Controller Retired heartbeats recover lost CANCEL messages and permanently retire that attempt. Clock conversion now waits for retained fit samples on both sides of an event; conversion latency can exceed the old block-close estimate. Per-device measured delay compensation is available through `JNS_TIMEBASE_DELAY_US`; zero remains uncalibrated. See [baseline validation](../../docs/baseline-validation.md).

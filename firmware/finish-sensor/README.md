@@ -69,3 +69,7 @@ For the GPIO bench, provide a clean 3.3 V-compatible active-low signal on GPIO 5
 For lanes 2–4, also power the corresponding ST-x, wait for discovery/sync, and enable the contiguous lane count on ST-1. Test all four lanes with their own start/finish inputs and confirm lane routing.
 
 Measure against a common reference before optics/track use. One-way minimum radio delay does not necessarily cancel for ST-1's direct START versus FN-1's converted finish; board/receiver/capture delays need measurement. Compare repeated edge separations, then actual beam interruptions. Exercise cancellation, dropped messages, controller reboot and power loss. No board has been flashed and no physical operation has been verified during this implementation.
+
+## Baseline v3 update
+
+Reflash the entire installation for protocol v3. Controller Retired heartbeats recover lost CANCEL messages and permanently retire that attempt. Clock conversion now waits for retained fit samples on both sides of an event; conversion latency can exceed the old block-close estimate. Per-device measured delay compensation is available through `JNS_TIMEBASE_DELAY_US`; zero remains uncalibrated. See [baseline validation](../../docs/baseline-validation.md).

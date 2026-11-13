@@ -1,19 +1,19 @@
 # Shared code
 
-- `include/lanetime/beam.hpp`: shared qualified beam-edge logic used by ST-1 and FN-1.
+- `include/lanetime/beam.hpp`: shared qualified beam-edge logic used by all start and finish posts.
 - `include/lanetime/protocol.hpp`: wire contract encoder/decoder (below).
 - `include/lanetime/timebase.hpp`: ST-1 timebase tracking (specification §5.1). Native tests: `sh firmware/shared/tests/run.sh`. Callers must serialise `sample()` (radio callback) against conversions (main loop).
 
-# Prototype wire contract v2
+# Prototype wire contract v3
 
-`include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. The lane-display prototype also uses this contract; FN-1 also uses it; other sensor/spare firmware is still to be built. This contract may change during bench testing and has no JNS_Timing code dependency.
+`include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. Controller, external starts, all four finishes and lane displays use this contract; spare firmware remains unimplemented. This contract may change during bench testing and has no JNS_Timing code dependency.
 
 ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-endian, explicitly encoded; no packed structs or native-endian assumptions.
 
 | Offset | Bytes | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `JNSL` |
-| 4 | 1 | Version = 2 (v1 is rejected) |
+| 4 | 1 | Version = 3 (v1/v2 are rejected) |
 | 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7 |
 | 6 | 1 | Sender role: Controller=1, Start=2, Finish=3 |
 | 7 | 1 | Sender lane 1–4; controller always lane 1 |
@@ -22,7 +22,7 @@ ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-en
 | 20 | 4 | Attempt: incremented on each accepted ARM |
 | 24 | 1 | Mode: Flying=0, Standing=1 |
 | 25 | 1 | Enabled-lane mask, bits 0–3 |
-| 26 | 1 | Flags: Ready=1, Armed=2, Running=4, Complete=8, Fault=16, Cued=32 |
+| 26 | 1 | Flags: Ready=1, Armed=2, Running=4, Complete=8, Fault=16, Cued=32, Retired=64 |
 | 27 | 1 | Reveal: finished-lane mask, bits 0–3; otherwise reserved, zero |
 | 28 | 8 | See *Value field* below |
 | 36 | 4 | Sender boot token, random nonzero per boot |
@@ -58,10 +58,20 @@ Result comes from the matching finish sensor, with its own role/lane/boot token,
 
 ST-1 sends Reveal once it holds every enabled lane's Result, or when the coach presses reveal now. It freezes the result set and schedules the reveal 1 s ahead, then submits Reveal immediately and every 100 ms until that instant. Busy/failed submissions are retried; the timestamp and mask never change. Each display holds its own lane's Result and shows it at the reveal time, converted through its timebase, not on receipt. A lane whose bit is clear in the finished-lane mask shows DNF. Displays show only their own lane's time. A set bit with no matching Result means missing data, not DNF: show an explicit unavailable indication. A display must receive at least one Reveal before its deadline for a synchronised reveal; receive-only broadcast cannot guarantee delivery.
 
-Reveal uses byte 27 for a finished mask that must be a subset of the enabled mask (zero means all DNF). It must come from Controller lane 1 and have nonzero session, attempt, reveal time and boot token. Other packets still require byte 27 to be zero. The existing 40-byte v2 layout is retained; older decoders reject Reveal, so display firmware must use the updated shared decoder.
+Reveal uses byte 27 for a finished mask that must be a subset of the enabled mask (zero means all DNF). It must come from Controller lane 1 and have nonzero session, attempt, reveal time and boot token. Other packets still require byte 27 to be zero. The existing 40-byte v3 layout is retained; all units must be reflashed together; v2 packets are rejected.
 
 ST-1 keeps configuration locked and eInk refresh suspended during its reveal lead-in. CANCEL and faults abort the scheduled reveal. The 30-second deadline applies to collecting results; a reveal scheduled by that deadline may finish its one-second lead-in afterwards. Required sensor readiness/identity checks remain active until the reveal.
 
 CANCEL is terminal for the matching session/attempt regardless of subsequent configuration changes. Controller Fault status must also invalidate matching attempts/results. Expire control status locally after a provisional three seconds so lost cancellation cannot leave a sensor armed indefinitely. ST-1 sends Status every 500 ms in every state; required sensor status likewise expires after three seconds at ST-1. The group deadline is 30 seconds from ARM. Controller Preparing is represented by ARM packets, without Armed in controller Status.
 
-START and GO carry timestamps, so retries are safe: a late or repeated copy carries the same time. Radio delay and loss therefore affect only when a result appears, not its value. Sync error, drift and sensing latency remain to be measured.
+START and GO carry timestamps, so retries are safe: a late or repeated copy carries the same time. START/Result delivery timestamps do not enter the elapsed calculation. Heartbeat delay biases the timebase, while message loss can invalidate an attempt. Sync error, drift and sensing latency remain to be measured.
+
+## Baseline recovery and clock calibration (v3)
+
+Controller Status carries **Retired (64)** whenever ST-1 is idle after an attempt. This flag is valid only on controller Status and cannot coexist with Armed, Running, Complete or Cued. It retires the advertised attempt even if every CANCEL copy was lost; sensors stop and displays clear. It persists until a newer ARM. Preparing does not carry Retired. Fault status remains terminal. Retirement recovery still requires reception of a heartbeat; complete control loss uses the existing local expiry.
+
+`timebase.hpp` requires actual retained, non-rejected fit points bracketing an event. A block-closing heartbeat alone is insufficient. Event conversion may take several seconds; rejected blocks can extend this until the attempt deadline.
+
+`JNS_TIMEBASE_DELAY_US` is an optional per-device measured minimum heartbeat-delay correction, expressed in ST-1 microseconds. It defaults to zero (uncalibrated), applies in both conversion directions, and survives session resets. Do not copy a simulation delay into firmware. See [calibration and validation](../../docs/baseline-validation.md).
+
+`include/lanetime/cue_player.hpp` is the common bounded-lateness/lease cue engine used by ST-1 and external start posts.

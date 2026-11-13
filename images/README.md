@@ -36,7 +36,7 @@ Simple lane 1 finish sensor with active optics and no reflector.
 
 LN-1 shown with a four-digit LED readout of 1.750 seconds. The same enclosure design serves LN-2–LN-4 with matching lane labels. Initial format: `0.000` seconds; display resolution does not establish timing accuracy.
 
-Four Neo7 Mini digit modules per case were the original prototype approach; cheaper off-the-shelf WS2812B matrix panels are now being weighed against them, and existing 8×8 RGB matrices may stand in for testing. Module dimensions, decimal-point provision, electrical requirements, and outdoor readability still need confirming. The shallow sun hood and amber colour are illustrative. A later change to `00.00`, or five digits for `00.000`, remains possible.
+The implemented firmware now drives a four-module MAX7219 32×8 matrix on C3 or Stamp-S3; this image remains an earlier enclosure/digit concept. Four Neo7 Mini digit modules per case were the original prototype approach; cheaper off-the-shelf WS2812B matrix panels are now being weighed against them, and existing 8×8 RGB matrices may stand in for testing. Module dimensions, decimal-point provision, electrical requirements, and outdoor readability still need confirming. The shallow sun hood and amber colour are illustrative. A later change to `00.00`, or five digits for `00.000`, remains possible.
 
 ![LN-1 lane result display](ln-1-result-display.png)
 

@@ -1,4 +1,5 @@
 #include <cassert>
+#include <initializer_list>
 #include <cstdio>
 #include <cstring>
 #include "lane_display.hpp"
@@ -167,7 +168,20 @@ void formatting() {
   displayText(DisplayState::Pending,0,false,out); assert(!strcmp(out,"SYNC"));
   displayText(DisplayState::Offline,0,false,out); assert(!strcmp(out,"----"));
 }
+void lostCancelRecovery() {
+  for (bool revealed:{false,true}) {
+    Fixture f; f.warm(); f.arm(); f.result(); f.reveal();
+    if (revealed) { f.advance(); f.advance(); assert(f.d.state()==DisplayState::Time); }
+    // All CANCEL copies lost; durable retirement arrives through Status.
+    f.c.flags=jns::Retired; f.advance();
+    assert(f.d.state()==DisplayState::Unavailable && !f.d.elapsed());
+    f.arm(); f.result(); f.reveal();
+    assert(f.d.state()==DisplayState::Unavailable);
+    f.arm(2); assert(f.d.state()==DisplayState::Pending);
+  }
+}
 int main() {
+  lostCancelRecovery();
   happyPath(); masksAndMissingData(); filtering(); cancellations(); identities();
   expiryAndRevealValidation(); wireToFourDisplays(); formatting(); puts("All lane-display tests passed");
 }

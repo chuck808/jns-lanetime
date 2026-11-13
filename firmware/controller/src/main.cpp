@@ -12,6 +12,8 @@
 #include "controller.hpp"
 #include "beam.hpp"
 #include "button.hpp"
+#include <lanetime/cue_player.hpp>
+#include <freertos/semphr.h>
 #ifndef JNS_BENCH
 #define JNS_BENCH 0
 #endif
@@ -77,6 +79,7 @@ Packet packet(Kind kind) {
   if (controller->state==State::Running) p.flags|=jns::Running;
   if (controller->state==State::Revealing || controller->state==State::Complete) p.flags|=jns::Complete;
   if (kind==Kind::Reveal) p.finishedMask=controller->finished;
+  if (kind==Kind::Status && controller->state==State::Idle && controller->attempt) p.flags|=jns::Retired;
   if (controller->state==State::Fault) p.flags|=jns::Fault;
   if (controller->mode==Mode::Standing || beam.clear(nowUs())) p.flags|=jns::Ready;
   return p;
@@ -100,38 +103,58 @@ bool transmit(Kind kind,uint64_t value=0) {
 }
 // Countdown cues run from an esp_timer at scheduled ST-1 instants, independent of the
 // main loop. ST-2..N do the same after converting GO to their own clocks.
-struct Cue { uint64_t at; uint16_t hz; };
-Cue cues[2*(kCueBeeps+1)];
-uint8_t cueCount=0;
-volatile uint8_t cueNext=0;
+SemaphoreHandle_t cueMutex=nullptr;
 esp_timer_handle_t cueTimer=nullptr;
-void armCue() {
-  const int64_t wait=int64_t(cues[cueNext].at)-esp_timer_get_time();
-  esp_timer_start_once(cueTimer,wait>0?uint64_t(wait):0);
-}
+CuePlayer cuePlayer;
+uint64_t scheduledGo=0, cueLease=0;
+uint16_t alertHz=0;
 void cueFire(void*) {
-  const Cue& c=cues[cueNext];
-  if (c.hz) { digitalWrite(speakerEnable,HIGH); ledcWriteTone(soundChannel,c.hz); }
-  else { ledcWrite(soundChannel,0); digitalWrite(speakerEnable,LOW); }
-  if (++cueNext<cueCount) armCue();
+  if (xSemaphoreTake(cueMutex,0)!=pdTRUE) return;
+  const uint64_t now=nowUs();
+  uint16_t hz=cuePlayer.tick(now,cueLease);
+  if (toneUntil && now<toneUntil) hz=alertHz;
+  else toneUntil=0;
+  static uint16_t previous=0;
+  if (hz!=previous) {
+    if (hz) { digitalWrite(speakerEnable,HIGH); ledcWriteTone(soundChannel,hz); }
+    else { ledcWrite(soundChannel,0); digitalWrite(speakerEnable,LOW); }
+    previous=hz;
+  }
+  xSemaphoreGive(cueMutex);
 }
 void stopCues() {
-  if (cueTimer) esp_timer_stop(cueTimer);
-  cueCount=cueNext=0; ledcWrite(soundChannel,0); digitalWrite(speakerEnable,LOW);
+  if (!cueMutex) return;
+  xSemaphoreTake(cueMutex,portMAX_DELAY);
+  cuePlayer.stop(); scheduledGo=0; toneUntil=0;
+  xSemaphoreGive(cueMutex);
 }
 void scheduleCues(uint64_t goAt) {
-  if (!cueTimer) return;
-  stopCues(); uint8_t n=0;
-  for (uint8_t i=kCueBeeps;i>0;--i) {
-    const uint64_t at=goAt-i*kCueStepUs;
-    cues[n++]={at,1000}; cues[n++]={at+120000,0};
+  if (!cueMutex) return;
+  xSemaphoreTake(cueMutex,portMAX_DELAY);
+  const uint64_t now=nowUs();
+  if (goAt<3000000 || goAt-3000000<=now+20000) controller->fail("Cue schedule too late");
+  else {
+    uint64_t times[8];
+    for (uint8_t i=0;i<8;++i) {
+      const uint8_t tone=i/2;
+      times[i]=goAt-(3-tone)*1000000ULL+(i%2?(tone==3?400000:120000):0);
+    }
+    cuePlayer.schedule(times); scheduledGo=goAt; cueLease=now+100000;
   }
-  cues[n++]={goAt,2000}; cues[n++]={goAt+400000,0};
-  cueCount=n; cueNext=0; armCue();
+  xSemaphoreGive(cueMutex);
+}
+void serviceCues() {
+  if (!cueMutex) return;
+  xSemaphoreTake(cueMutex,portMAX_DELAY);
+  if (cuePlayer.failed()) { controller->fail("Cue timer missed deadline"); fatalHardware=true; }
+  cueLease=nowUs()+100000;
+  xSemaphoreGive(cueMutex);
 }
 void beep(uint16_t hz,uint32_t durationMs) {
-  digitalWrite(speakerEnable,HIGH); ledcWriteTone(soundChannel,hz);
-  toneUntil=nowUs()+uint64_t(durationMs)*1000;
+  if (!cueMutex) return;
+  xSemaphoreTake(cueMutex,portMAX_DELAY);
+  alertHz=hz; toneUntil=nowUs()+uint64_t(durationMs)*1000;
+  xSemaphoreGive(cueMutex);
 }
 const char* stateName(State state) {
   switch (state) {
@@ -211,9 +234,12 @@ void setup() {
   }
   const double irHz=ledcSetup(irChannel,38000,8);
   ledcAttachPin(txPin,irChannel); ledcWrite(irChannel,0);
-  ledcSetup(soundChannel,2000,8); ledcAttachPin(speakerPin,soundChannel);
+  const double soundHz=ledcSetup(soundChannel,2000,8);
+  ledcAttachPin(speakerPin,soundChannel); ledcWrite(soundChannel,0);
   const esp_timer_create_args_t cueArgs={cueFire,nullptr,ESP_TIMER_TASK,"cues",false};
-  if (esp_timer_create(&cueArgs,&cueTimer)!=ESP_OK) { controller->fail("Cue timer setup failed"); fatalHardware=true; }
+  cueMutex=xSemaphoreCreateMutex();
+  if (!cueMutex || soundHz<1900 || soundHz>2100 || esp_timer_create(&cueArgs,&cueTimer)!=ESP_OK ||
+      esp_timer_start_periodic(cueTimer,1000)!=ESP_OK) { controller->fail("Cue timer setup failed"); fatalHardware=true; }
   if (irHz<37500 || irHz>38500) { controller->fail("IR PWM setup failed"); fatalHardware=true; }
   SPI.begin(36,37,35,8); display.begin(THINKINK_MONO); display.setRotation(0);
   beam.edge(digitalRead(rxPin)!=LOW,nowUs());
@@ -223,7 +249,7 @@ void setup() {
 }
 void loop() {
   uint64_t now=nowUs(); const State before=controller->state;
-  if (toneUntil && now>=toneUntil) { ledcWrite(soundChannel,0); digitalWrite(speakerEnable,LOW); toneUntil=0; }
+  serviceCues();
   if (radioQueue) {
     Received r;
     while (xQueueReceive(radioQueue,&r,0)==pdTRUE) {
@@ -296,7 +322,7 @@ void loop() {
   if (controller->state==State::Countdown) {
     // Repeat the schedule until every required unit echoes it; tick() aborts at the first cue otherwise.
     if (!controller->cued(now) && now-lastGoSend>=250000 && transmit(Kind::Go,controller->goAt)) lastGoSend=now;
-    if (!cueCount && controller->cued(now)) scheduleCues(controller->goAt);
+    if (!scheduledGo && controller->cued(now)) scheduleCues(controller->goAt);
   }
   if (controller->startPending(now) && now-lastStartSend>=100000 && transmit(Kind::Start,controller->startAt)) lastStartSend=now;
   if (controller->state!=before) {
