@@ -20,7 +20,9 @@ class FinishSensor {
   bool clear(uint64_t now) const { return beam_.clear(now); }
   bool ready(uint64_t now) const { return !locked_ && online_ && clock_.ready(now) && clear(now) && startReady(now); }
   void hardwareFault() { locked_=true; invalidate(); }
-  void overflow() { hardwareFault(); } // Lost edges/control messages cannot be reconstructed.
+  // Lost or stale input (queue overflow, stalled loop): the attempt cannot be trusted, but the
+  // unit can. Void the attempt and resynchronise the beam from the receiver's current level.
+  void overflow(bool broken,uint64_t now) { invalidate(); beam_=Beam(); beam_.edge(broken,now); }
   void edge(bool broken,uint64_t at) {
     beam_.edge(broken,at); takeBreak();
   }
@@ -67,8 +69,9 @@ class FinishSensor {
       if (p.kind!=Kind::Status) return;
       for (uint8_t i=0;i<retiredCount_;++i) if (retiredSessions_[i]==p.session) return;
       if (session_) {
-        if (retiredCount_==8) { hardwareFault(); return; }
-        retiredSessions_[retiredCount_++]=session_;
+        // Rolling memory: the oldest retired session is forgotten, never a reason to stop.
+        retiredSessions_[retiredNext_]=session_; retiredNext_=(retiredNext_+1)%8;
+        if (retiredCount_<8) ++retiredCount_;
       }
       startKnown_=false;
       session_=p.session; controllerBoot_=p.boot; clock_=Timebase(); online_=false; lastRemote_=0;
@@ -193,7 +196,7 @@ class FinishSensor {
   }
   uint32_t system_,boot_,controllerBoot_=0,attempt_=0;
   Packet startStatus_;
-  uint8_t lane_,startMac_[6]={},controller_[6]={},mask_=1,count_=0,retiredCount_=0;
+  uint8_t lane_,startMac_[6]={},controller_[6]={},mask_=1,count_=0,retiredCount_=0,retiredNext_=0;
   uint64_t session_=0,retiredSessions_[8]={},lastStatus_=0,lastRemote_=0,armLocal_=0,armRemote_=0,
       startRemote_=0,elapsed_=0,startSeen_=0,lastBreak_=0,breaks_[8]={};
   bool startKnown_=false,bound_=false,online_=false,locked_=false,haveStart_=false,sealed_=false,seenBreak_=false;

@@ -19,7 +19,9 @@ class StartSensor {
   bool clear(uint64_t now) const { return beam_.clear(now); }
   bool ready(uint64_t now) const { return !locked_ && online_ && clock_.ready(now) && (mode_==Mode::Standing || clear(now)); }
   void hardwareFault() { locked_=true; invalidate(); }
-  void overflow() { hardwareFault(); } // Lost edges/control messages cannot be reconstructed.
+  // Lost or stale input (queue overflow, stalled loop): the attempt cannot be trusted, but the
+  // unit can. Void the attempt and resynchronise the beam from the receiver's current level.
+  void overflow(bool broken,uint64_t now) { invalidate(); beam_=Beam(); beam_.edge(broken,now); }
   void edge(bool broken,uint64_t at) {
     beam_.edge(broken,at); takeBreak();
   }
@@ -68,8 +70,9 @@ class StartSensor {
       if (p.kind!=Kind::Status) return;
       for (uint8_t i=0;i<retiredCount_;++i) if (retiredSessions_[i]==p.session) return;
       if (session_) {
-        if (retiredCount_==8) { hardwareFault(); return; }
-        retiredSessions_[retiredCount_++]=session_;
+        // Rolling memory: the oldest retired session is forgotten, never a reason to stop.
+        retiredSessions_[retiredNext_]=session_; retiredNext_=(retiredNext_+1)%8;
+        if (retiredCount_<8) ++retiredCount_;
       }
       session_=p.session; controllerBoot_=p.boot; clock_=Timebase(); online_=false; lastRemote_=0;
       // Retire the attempt already in progress at discovery/reboot; never resume it.
@@ -159,7 +162,7 @@ class StartSensor {
     eventLocal_=at; // First qualified edge is immutable, even while interpolation is pending.
   }
   uint32_t system_,boot_,controllerBoot_=0,attempt_=0;
-  uint8_t lane_,controller_[6]={},finishMac_[6]={},mask_=1,retiredCount_=0;
+  uint8_t lane_,controller_[6]={},finishMac_[6]={},mask_=1,retiredCount_=0,retiredNext_=0;
   uint32_t finishBoot_=0;
   uint64_t session_=0,retiredSessions_[8]={},lastStatus_=0,lastRemote_=0,armLocal_=0,armRemote_=0,
       startRemote_=0,eventLocal_=0,goLocal_=0,cueTimes_[8]={};

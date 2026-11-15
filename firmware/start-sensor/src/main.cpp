@@ -121,21 +121,19 @@ void setup() {
   Serial.println(JNS_SYNC_BENCH?"ST GPIO bench: LIVE radio and cues, IR disabled":"ST-2–ST-4 optical prototype");
 }
 void loop() {
-  portENTER_CRITICAL(&radioLock); const bool overflow=lost; lost=false; portEXIT_CRITICAL(&radioLock);
-  if (overflow && inbox) { xQueueReset(inbox); sensor->overflow(); }
+  portENTER_CRITICAL(&radioLock); bool dropped=lost; lost=false; portEXIT_CRITICAL(&radioLock);
   Input input;
-  while (inbox && xQueueReceive(inbox,&input,0)==pdTRUE) {
-    if (input.edge) {
-      if (nowUs()-input.at>100000) sensor->overflow();
-      else sensor->edge(input.broken,input.at);
-    } else {
+  while (!dropped && inbox && xQueueReceive(inbox,&input,0)==pdTRUE) {
+    // A backlog over 100 ms means the loop stalled: discard it rather than apply it late.
+    if (nowUs()-input.at>100000) { dropped=true; break; }
+    if (input.edge) sensor->edge(input.broken,input.at);
+    else {
       Packet p;
-      if (decode(input.bytes,sizeof(input.bytes),p) && p.system==JNS_SYSTEM_ID) {
-        if (nowUs()-input.at>100000) sensor->overflow();
-        else sensor->receive(input.mac,p,input.at);
-      }
+      if (decode(input.bytes,sizeof(input.bytes),p) && p.system==JNS_SYSTEM_ID) sensor->receive(input.mac,p,input.at);
     }
   }
+  // Void the attempt only; the unit recovers on ST-1's CANCEL or Retired heartbeat.
+  if (dropped && inbox) { xQueueReset(inbox); sensor->overflow(digitalRead(JNS_IR_RX)!=LOW,nowUs()); }
   const uint64_t now=nowUs(); sensor->tick(now);
   updateCues(now); // Install schedule before advertising Cued.
   digitalWrite(JNS_ALIGN_LED,sensor->clear(now)?HIGH:LOW); // Beam clear only, not optical margin.

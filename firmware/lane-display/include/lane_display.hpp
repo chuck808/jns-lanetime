@@ -14,7 +14,9 @@ class LaneDisplay {
   DisplayState state() const { return state_; }
   uint64_t elapsed() const { return elapsed_; }
   bool synced(uint64_t now) const { return online_ && clock_.ready(now); }
-  void overflow() { lock(); }
+  // Lost or stale input voids an attempt in progress. A revealed result stays shown;
+  // a newer attempt recovers as usual.
+  void overflow() { if (!locked_ && state_==DisplayState::Pending) invalidate(); }
   void hardwareFault() { lock(); }
   void tick(uint64_t now) {
     if (locked_) return;
@@ -47,8 +49,9 @@ class LaneDisplay {
         if (p.kind!=Kind::Status) return;
         for (uint8_t i=0;i<retiredCount_;++i) if (retired_[i]==p.session) return;
         if (session_) {
-          if (retiredCount_==8) { lock(); return; }
-          retired_[retiredCount_++]=session_;
+          // Rolling memory: the oldest retired session is forgotten, never a reason to stop.
+          retired_[retiredNext_]=session_; retiredNext_=(retiredNext_+1)%8;
+          if (retiredCount_<8) ++retiredCount_;
         }
         session_=p.session; controllerBoot_=p.boot; clock_=Timebase();
         attempt_=0; terminal_=false; scheduled_=haveResult_=peer_=false;
@@ -108,7 +111,7 @@ class LaneDisplay {
   }
   void lock() { invalidate(); locked_=true; state_=DisplayState::Fault; }
   uint32_t system_, attempt_=0, controllerBoot_=0, finishBoot_=0;
-  uint8_t lane_, controller_[6]={}, finish_[6]={}, mask_=0, finished_=0, retiredCount_=0;
+  uint8_t lane_, controller_[6]={}, finish_[6]={}, mask_=0, finished_=0, retiredCount_=0, retiredNext_=0;
   uint64_t session_=0, retired_[8]={}, lastStatus_=0, lastRemote_=0, adoptedAt_=0,
       finishSeen_=0, elapsed_=0, revealLocal_=0, revealRemote_=0;
   bool bound_=false, online_=false, terminal_=false, scheduled_=false,

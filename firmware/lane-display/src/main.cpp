@@ -73,19 +73,18 @@ void loop() {
     paint(frames[(nowUs()/3000000)%7]); delay(1); return;
   }
   display.tick(nowUs());
-  portENTER_CRITICAL(&inboxLock); const bool overflow=lost; lost=false; portEXIT_CRITICAL(&inboxLock);
-  if (overflow) {
-    // Drop the entire batch: a lost CANCEL may precede a queued Result or Reveal.
-    xQueueReset(inbox); display.overflow();
-  }
+  portENTER_CRITICAL(&inboxLock); bool dropped=lost; lost=false; portEXIT_CRITICAL(&inboxLock);
   Received r;
-  while (inbox && xQueueReceive(inbox,&r,0)==pdTRUE) {
+  while (!dropped && inbox && xQueueReceive(inbox,&r,0)==pdTRUE) {
     Packet p;
     if (decode(r.bytes,sizeof(r.bytes),p) && p.system==JNS_SYSTEM_ID) {
-      if (nowUs()-r.at>100000) display.overflow();
-      else display.receive(r.mac,p,r.at);
+      // A backlog over 100 ms means the loop stalled: discard it rather than apply it late.
+      if (nowUs()-r.at>100000) { dropped=true; break; }
+      display.receive(r.mac,p,r.at);
     }
   }
+  // Drop the entire batch: a lost CANCEL may precede a queued Result or Reveal.
+  if (dropped && inbox) { xQueueReset(inbox); display.overflow(); }
   const uint64_t now=nowUs(); display.tick(now);
   char text[8]; displayText(display.state(),display.elapsed(),display.synced(now),text); paint(text);
   delay(1);
