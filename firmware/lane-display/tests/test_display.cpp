@@ -118,8 +118,13 @@ void expiryAndRevealValidation() {
   { Fixture f; f.warm(); f.arm(); f.c.kind=Kind::Reveal; f.c.value=f.remote+3000000;
     f.d.receive(control,f.c,f.local()); assert(f.d.state()==DisplayState::Unavailable); }
   { Fixture f; f.beat(); f.arm(); f.reveal(); assert(f.d.state()==DisplayState::Unavailable); }
+  // Lost input voids the pending attempt; the next attempt displays normally.
   { Fixture f; f.warm(); f.arm(); f.result(); f.d.overflow(); f.reveal();
-    assert(f.d.state()==DisplayState::Fault); }
+    assert(f.d.state()==DisplayState::Unavailable);
+    f.arm(2); f.result(); f.reveal(); f.advance(); f.advance(); assert(f.d.state()==DisplayState::Time); }
+  // A revealed time stays shown.
+  { Fixture f; f.warm(); f.arm(); f.result(); f.reveal(); f.advance(); f.advance();
+    f.d.overflow(); assert(f.d.state()==DisplayState::Time); }
   { Fixture f; f.warm(); f.arm(); for (int i=0;i<65;++i) f.advance();
     assert(f.d.state()==DisplayState::Unavailable); }
   { Fixture f; f.warm(); f.arm(); f.result(); f.reveal(); f.reveal();
@@ -180,8 +185,16 @@ void lostCancelRecovery() {
     f.arm(2); assert(f.d.state()==DisplayState::Pending);
   }
 }
+// ST-1 rebooted ten times: each new session is adopted; recent retired sessions stay rejected.
+void manySessions() {
+  Fixture f; f.warm();
+  for (uint32_t s=100;s<110;++s) { f.c.session=s; f.c.boot=s; f.c.attempt=0; f.c.flags=0; f.warm(); }
+  f.arm(); auto old=f.c; old.session=108; old.boot=108; old.kind=Kind::Status; old.value=f.remote+100;
+  f.d.receive(control,old,f.local()); assert(f.d.state()==DisplayState::Pending);
+  f.result(); f.reveal(); f.advance(); f.advance(); assert(f.d.state()==DisplayState::Time);
+}
 int main() {
   lostCancelRecovery();
-  happyPath(); masksAndMissingData(); filtering(); cancellations(); identities();
+  happyPath(); manySessions(); masksAndMissingData(); filtering(); cancellations(); identities();
   expiryAndRevealValidation(); wireToFourDisplays(); formatting(); puts("All lane-display tests passed");
 }

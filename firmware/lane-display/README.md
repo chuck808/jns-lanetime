@@ -85,7 +85,7 @@ Breakout reference: [M5Stack Stamp-S3 GroveBreakOut](https://docs.m5stack.com/en
 | `DNF` | This lane's bit is clear in the Reveal finished mask |
 | `ERR` | Invalid/cancelled attempt, missed data or unusable reveal schedule |
 | `OFF` | This lane is disabled |
-| `FAIL` | Latched identity conflict, receive backlog/overflow, or hardware setup failure; restart after investigating |
+| `FAIL` | Latched identity conflict or hardware setup failure; restart after investigating |
 
 No running clock, ranking or rep-number alternation. Five-pixel numeric glyphs and a one-column decimal fit `30.000` in 31 columns. The whole frame updates when content changes. Rendering uses software SPI and loop scheduling; simultaneous physical LED onset is not yet measured.
 
@@ -93,13 +93,13 @@ The radio-free bench build cycles `TEST`, `1.750`, `12.345`, `30.000`, `DNF`, `E
 
 ## Result and fault handling
 
-- Bind to the first valid same-system controller Status MAC. Another same-system controller Status locks the display to `FAIL` until restart. Rebooted controller sessions clear output and rebuild clock sync. Retired sessions cannot be readopted; after eight retired sessions a display restart is required to bound memory safely.
+- Bind to the first valid same-system controller Status MAC. Another same-system controller Status locks the display to `FAIL` until restart. Rebooted controller sessions clear output and rebuild clock sync. Retired sessions cannot be readopted; the last eight are remembered and the oldest is forgotten, so ST-1 can be rebooted any number of times.
 - Track heartbeats using the shared block-minimum/drift fit (about eight seconds to establish sync). Capture local time first in the receive callback; queue records and keep all state/timebase mutation in the main loop.
 - A newer controller Status or ARM clears old output and establishes attempt identity. A CANCEL also retires an attempt even if its ARM was missed. Duplicate ARM and old attempts cannot reopen terminal output. Controller Fault and configuration mismatches invalidate the matching attempt.
 - Only accept Results from this lane's finish MAC/boot identity, announced by a matching Armed Status within three seconds. Conflicting finish identities or reboots invalidate the attempt. The first valid elapsed value is immutable; accepted values are 1–30,000,000 microseconds.
 - Hold the Result until Reveal. Convert the scheduled ST-1 time through the timebase; require a fresh fit and a future deadline no more than two seconds away. Duplicate schedules must agree. At the deadline show time, DNF, or ERR if the mask says finished but the Result was missed. A Result may arrive after Reveal but must arrive before the deadline; no late Result changes the revealed output.
 - Three seconds without a fresh controller heartbeat clears the output and timebase. Repeated Results cannot keep a stale number alive. The expired attempt remains retired even when heartbeat reception resumes; a newer attempt can recover.
-- Pending attempts with no Reveal expire after 32 seconds (local adoption time). Lost sync during a scheduled reveal invalidates it. Queue overflow or a valid same-system packet queued for more than 100 ms locks `FAIL`, since a lost control packet could otherwise leave misleading output.
+- Pending attempts with no Reveal expire after 32 seconds (local adoption time). Lost sync during a scheduled reveal invalidates it. Queue overflow or a valid same-system packet queued for more than 100 ms shows `ERR` for a pending attempt, since a lost control packet could otherwise leave misleading output. A revealed time stays shown, and the next attempt recovers normally.
 
 Broadcast delivery is not guaranteed. At least one valid Reveal must arrive before its deadline; a missed cancellation cannot guarantee immediate clearing at every unit. Firmware does not announce display presence or acknowledge results. Display resolution does not establish timing accuracy.
 

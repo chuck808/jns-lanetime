@@ -73,7 +73,11 @@ void recoveryAndFiltering() {
   { Fixture x; x.warm(); x.arm(); x.c.kind=Kind::Reveal; x.c.value=x.t+1000000; x.send(x.c);
     x.pulse(); for (int i=0;i<65;++i) x.advance(); Packet p;
     assert(!x.s.start(x.t+offset,p) && (x.s.status(x.t+offset).flags&jns::Armed)); }
-  { Fixture x; x.warm(); x.arm(); x.s.overflow(); x.c.kind=Kind::Cancel; x.send(x.c); assert(!x.s.ready(x.t+offset)); }
+  // Lost input voids the attempt but not the unit: CANCEL and an idle heartbeat recover it.
+  { Fixture x; x.warm(); x.arm(); x.s.overflow(false,x.t+offset);
+    assert(x.s.state()==StartState::Invalid && (x.s.status(x.t+offset).flags&jns::Fault));
+    x.c.kind=Kind::Cancel; x.send(x.c); x.c.flags=0; x.advance();
+    assert(x.s.ready(x.t+offset)); x.arm(Mode::Flying,2); }
   { Fixture x; x.warm(); x.arm(); auto f=x.finish(); x.send(f,finishMac); f.boot++; x.send(f,finishMac);
     assert(x.s.state()==StartState::Invalid); }
   { Fixture x; x.warm(); x.send(x.s.status(x.t+offset),alien); assert(!x.s.ready(x.t+offset)); }
@@ -132,5 +136,12 @@ void retiredHeartbeat() {
   assert(x.s.state()==StartState::Idle); // A duplicate cannot reopen the retired attempt.
   x.arm(Mode::Flying,2);
 }
-int main() { retiredHeartbeat(); flying(); standing(); recoveryAndFiltering(); controllerIntegration(Mode::Flying);
+// ST-1 rebooted ten times: each new session is adopted; recent retired sessions stay rejected.
+void manySessions() {
+  Fixture x; x.warm();
+  for (uint32_t s=100;s<110;++s) { x.c.session=s; x.c.boot=s; x.c.attempt=0; x.c.flags=0; x.warm(); }
+  x.arm(); auto old=x.c; old.session=108; old.boot=108; old.kind=Kind::Status; old.value=x.t+100; x.send(old);
+  assert(x.s.state()==StartState::Armed && x.s.status(x.t+offset).session==109);
+}
+int main() { retiredHeartbeat(); flying(); standing(); recoveryAndFiltering(); manySessions(); controllerIntegration(Mode::Flying);
   controllerIntegration(Mode::Standing); puts("All external start-sensor tests passed"); }

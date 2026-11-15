@@ -78,8 +78,15 @@ void invalidationAndRecovery() {
   // Nine separate bursts (quiet gaps longer than kBurstUs) with no START overflow the buffer.
   { Fixture x; x.warm(); x.arm(); for (int i=0;i<9;++i) x.pulse(x.t+600000);
     assert(x.f.state()==FinishState::Invalid); }
-  { Fixture x; x.warm(); x.arm(); x.f.overflow(); x.c.kind=Kind::Cancel;
-    x.f.receive(controlMac,x.c,x.t+offset); assert(!x.f.ready(x.t+offset)); }
+  // Lost input voids the attempt but not the unit: CANCEL and an idle heartbeat recover it.
+  { Fixture x; x.warm(); x.arm(); x.start(); x.f.overflow(false,x.t+offset);
+    assert(x.f.state()==FinishState::Invalid && (x.f.status(x.t+offset).flags&jns::Fault));
+    x.c.kind=Kind::Cancel; x.f.receive(controlMac,x.c,x.t+offset); x.c.flags=0;
+    x.advance(); assert(x.f.ready(x.t+offset)); x.arm(Mode::Flying,2); }
+  // Idle: the next idle heartbeat clears it. The beam is resynchronised from the pin level.
+  { Fixture x; x.warm(); x.f.overflow(true,x.t+offset); x.advance();
+    assert(x.f.state()==FinishState::Idle && !x.f.ready(x.t+offset));
+    x.f.edge(false,x.t+offset); x.advance(); assert(x.f.ready(x.t+offset)); }
   { Fixture x; x.warm(); x.c.attempt=3; x.c.kind=Kind::Cancel; x.f.receive(controlMac,x.c,x.t+offset);
     x.c.kind=Kind::Arm; x.f.receive(controlMac,x.c,x.t+offset); assert(x.f.state()==FinishState::Idle); }
 }
@@ -102,6 +109,14 @@ void filtersAndReboots() {
     assert(!x.f.ready(x.t+offset)); }
   { Fixture x; x.warm(); auto p=x.f.status(x.t+offset); x.f.receive(alien,p,x.t+offset);
     assert(!x.f.ready(x.t+offset)); }
+}
+// ST-1 rebooted ten times: each new session is adopted; recent retired sessions stay rejected.
+void manySessions() {
+  Fixture x; x.warm();
+  for (uint32_t s=100;s<110;++s) { x.c.session=s; x.c.boot=s; x.c.attempt=0; x.c.flags=0; x.warm(); }
+  x.arm(); auto old=x.c; old.session=108; old.boot=108; old.kind=Kind::Status; old.value=x.t+100;
+  x.f.receive(controlMac,old,x.t+offset);
+  assert(x.f.state()==FinishState::Armed && x.f.status(x.t+offset).session==109);
 }
 void beamAndReveal() {
   { Fixture x; x.warm(); x.arm(); x.start(); x.pulse(x.t+100000,100);
@@ -170,6 +185,6 @@ void retiredHeartbeat() {
 }
 int main() {
   retiredHeartbeat();
-  flyingAndLateStart(); wheelPassage(); standingAndStrays(); invalidationAndRecovery(); filtersAndReboots();
+  flyingAndLateStart(); wheelPassage(); standingAndStrays(); invalidationAndRecovery(); filtersAndReboots(); manySessions();
   beamAndReveal(); endToEnd(); puts("All FN-1 tests passed");
 }
