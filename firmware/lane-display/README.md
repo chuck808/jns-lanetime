@@ -118,3 +118,18 @@ Before track use: verify the bench font/orientation (especially decimal and `30.
 ## Baseline v3 update
 
 Reflash the entire installation for protocol v3. Controller Retired heartbeats recover lost CANCEL messages and permanently retire that attempt. Clock conversion now waits for retained fit samples on both sides of an event; conversion latency can exceed the old block-close estimate. Per-device measured delay compensation is available through `JNS_TIMEBASE_DELAY_US`; zero remains uncalibrated. See [baseline validation](../../docs/baseline-validation.md).
+
+## ESP32-C6 / WS2812B build
+
+`c6_lane1`–`c6_lane4` and `c6_bench` target the **DFRobot FireBeetle 2 ESP32-C6** (4 MB flash) driving an **8×32 WS2812B** panel. ESP32-C6 needs Arduino core 3.x, so these environments pin the pioarduino 51.03.07 platform; the other targets stay on espressif32 6.10.0.
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| Panel data | GPIO 6 (`JNS_MATRIX_DIN`) | Provisional. 300–500 Ω series resistor; 3.3 V data may need a 74AHCT125 |
+| Brightness | 16/255 (`JNS_MATRIX_BRIGHTNESS`, capped at 64) | Power the panel from its own 5 V supply with a common ground, never from the board |
+| Layout | Serpentine columns (`JNS_MATRIX_SERPENTINE`, `JNS_MATRIX_FLIP_X`, `JNS_MATRIX_FLIP_Y`) | Adjust if text is mirrored, inverted or scrambled |
+| Status LED | GPIO 15 (`JNS_STATUS_LED`) | Lit while synchronised to ST-1; useful without a panel |
+
+Text is amber and uses a built-in 5×7 font. On Windows, esptool's final reset may report a serial error after every "Hash of data verified" line; the image is written, but press RST if the board does not restart. If Smart App Control blocks the RISC-V toolchain locally, the **ESP32-C6 firmware** workflow publishes a merged image per environment; flash it at `0x0` with esptool.
+
+First hardware check (15–18 November 2026): LN-1 bound to a live MagTag ST-1 over ESP-NOW, synchronised (status LED) and showed `IDLE` on the panel. Digits, layout and reveal timing are not yet verified.

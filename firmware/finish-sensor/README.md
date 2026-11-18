@@ -73,3 +73,9 @@ Measure against a common reference before optics/track use. One-way minimum radi
 ## Baseline v3 update
 
 Reflash the entire installation for protocol v3. Controller Retired heartbeats recover lost CANCEL messages and permanently retire that attempt. Clock conversion now waits for retained fit samples on both sides of an event; conversion latency can exceed the old block-close estimate. Per-device measured delay compensation is available through `JNS_TIMEBASE_DELAY_US`; zero remains uncalibrated. See [baseline validation](../../docs/baseline-validation.md).
+
+## ESP32-C6 build
+
+`c6_fn1`–`c6_fn4` and `c6_fn1_sync` target the **DFRobot Beetle ESP32-C6 Mini** (4 MB flash) on the pinned pioarduino 51.03.07 platform (Arduino core 3.x). Provisional pins avoid the C6 strapping pins 4, 5, 8 and 9: IR drive GPIO 7, receiver/bench input GPIO 6, beam-clear indicator on the on-board LED (GPIO 15). Confirm against the board pinout before wiring optics.
+
+For `c6_fn1_sync`, GPIO 6 held LOW (e.g. a wire to GND) is a clear beam; releasing it to the pull-up is a break. If Smart App Control blocks the local RISC-V toolchain, use the merged image from the **ESP32-C6 firmware** workflow, flashed at `0x0`.
