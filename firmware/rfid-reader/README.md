@@ -50,7 +50,7 @@ See [contract](../../docs/reader-bench-contract.md) and [current development sco
 - [Core2 pin map](https://docs.m5stack.com/en/core/core2)
 - [Unit RFID2](https://docs.m5stack.com/en/unit/Unit_RFID2)
 - [M5 RFID tutorial](https://docs.m5stack.com/en/arduino/projects/unit/unit_rfid)
-- M5Unified 0.2.8 and M5GFX 0.2.11 (their upstream licences apply).
+- M5Unified 0.2.8 and M5GFX 0.3.0 (their upstream licences apply).
 - MFRC522_I2C pinned to upstream commit `8152dddc93cf743397ac225e34bf268698326664` from https://github.com/kkloesener/MFRC522_I2C; upstream files declare public-domain release. It is fetched as a dependency, not copied from Sportiduino.
 
 Long-term reader power target: a season of defined club use; annual AA battery replacement is a stretch goal requiring measurement. This screen-equipped Core2 bench target is not that low-power design.
