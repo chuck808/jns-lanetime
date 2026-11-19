@@ -6,6 +6,8 @@ This document defines the next extension to JNS LaneTime: club-issued rider tags
 
 **Status key:** **Agreed** records the behaviour settled in discussion. **Proposed** is a recommended implementation for review. **Open** requires a decision or measurement before the affected build step.
 
+> **19 November 2026 update:** Working brand is JNS SPLIT. The first reader target is Core2 + Unit RFID2; the separate web app starts as a test-only simulator. Durable offline recording is deferred to SD-equipped hardware. The MagTag prototype will use online uploads and a bounded RAM queue, with power-loss limitations. Earlier durable-journal statements below describe the eventual requirement, not the initial prototype. See [current development scope](development-status.md) and [reader bench instructions](../firmware/rfid-reader/README.md).
+
 ## 1. Existing system and scope
 
 The [build specification](build-specification.md) and [firmware documentation](../firmware/README.md) describe the existing prototype. It uses ST-1's common timebase, timestamped beam events, group attempts in both start modes and a scheduled result reveal. Controller, external start, finish and lane-display prototypes exist; physical timing accuracy remains unvalidated.
