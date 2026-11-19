@@ -1,0 +1,17 @@
+name: RFID bench
+on:
+  push:
+    paths: ['firmware/rfid-reader/**', '.github/workflows/rfid-bench.yml']
+  pull_request:
+    paths: ['firmware/rfid-reader/**', '.github/workflows/rfid-bench.yml']
+jobs:
+  core2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.1.18
+      - run: sh firmware/rfid-reader/tests/run.sh
+      - run: pio run -d firmware/rfid-reader
