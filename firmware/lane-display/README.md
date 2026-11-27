@@ -60,7 +60,7 @@ pio run -d firmware/lane-display -e stamp_s3_bench -t upload
 pio device monitor -d firmware/lane-display -b 115200
 ```
 
-This runs the existing radio-free demo using the project's actual font: TEST, 1.750, 12.345, 30.000, DNF, ERR and ----, three seconds each at fixed brightness. It differs from the separate brightness-sweep sketch. No serial connection is required for battery operation.
+This runs the existing radio-free demo using the project's actual font: TEST, 01.750, 12.345, 30.000, DNF, ERR and ----, three seconds each at fixed brightness, then a revealed time with its scrolling speed. It differs from the separate brightness-sweep sketch. No serial connection is required for battery operation.
 
 For live lane 1, select **stamp_s3_lane1** and upload, or run:
 
@@ -81,15 +81,20 @@ Breakout reference: [M5Stack Stamp-S3 GroveBreakOut](https://docs.m5stack.com/en
 | `IDLE` | Controller heard, no attempt adopted |
 | `SYNC` | Attempt pending while timebase acquires samples |
 | `----` | Awaiting reveal, or controller offline; never a numerical result |
-| `1.750` / `12.345` | This lane's result, rounded to milliseconds |
+| `01.750` / `12.345` | This lane's result, rounded to milliseconds, always with two digits of seconds |
+| `54.0 KM/H` (scrolling) | Average speed for that time over ST-1's distance setting; scrolls across between 4-second holds of the time |
 | `DNF` | This lane's bit is clear in the Reveal finished mask |
 | `ERR` | Invalid/cancelled attempt, missed data or unusable reveal schedule |
 | `OFF` | This lane is disabled |
 | `FAIL` | Latched identity conflict, receive backlog/overflow, or hardware setup failure; restart after investigating |
 
-No running clock, ranking or rep-number alternation. Five-pixel numeric glyphs and a one-column decimal fit `30.000` in 31 columns. The whole frame updates when content changes. Rendering uses software SPI and loop scheduling; simultaneous physical LED onset is not yet measured.
+No running clock, ranking or rep-number alternation. Five-pixel numeric glyphs and a one-column decimal fit `30.000` in 31 columns. The whole frame updates when content changes.
 
-The radio-free bench build cycles `TEST`, `1.750`, `12.345`, `30.000`, `DNF`, `ERR` and `----` every three seconds. It is for orientation, power and outdoor visibility tests; its numbers are demonstrations, not measured times. It never sends or receives application results.
+After a reveal the time is held still for 4 seconds, then the speed scrolls in from the right and off the left at 25 columns a second, and the cycle repeats until the next attempt. The speed is worked out on the display from the time it shows and the distance ST-1 sends in its Reveal (wire v4), so the two always agree. If ST-1 has no distance, only the time is shown. On a Standing start the speed is an average from a standstill, not a top speed.
+
+The LED colour is a property of the MAX7219 module, not the firmware. FC16 modules are sold in red, green, blue, yellow and white; JNS SPLIT's lane colours are lane 1 orange-red (`#ff5a36`), lane 2 blue (`#3b82f6`), lane 3 yellow (`#ffc83d`) and lane 4 teal (`#22c3a6`). Fit the closest module colour to each lane. Rendering uses software SPI and loop scheduling; simultaneous physical LED onset is not yet measured.
+
+The radio-free bench build cycles `TEST`, `01.750`, `12.345`, `30.000`, `DNF`, `ERR` and `----` every three seconds, then shows a revealed `02.004` with its 30 m speed scrolling, for 12 seconds. It is for orientation, power and outdoor visibility tests; its numbers are demonstrations, not measured times. It never sends or receives application results.
 
 ## Result and fault handling
 

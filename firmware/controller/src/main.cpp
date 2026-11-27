@@ -87,6 +87,7 @@ Packet packet(Kind kind) {
   if (controller->state==State::Running) p.flags|=jns::Running;
   if (controller->state==State::Revealing || controller->state==State::Complete) p.flags|=jns::Complete;
   if (kind==Kind::Reveal) p.finishedMask=controller->finished;
+  p.distance=uint8_t(distance);  // Lets lane displays show speed.
   if (kind==Kind::Status && controller->state==State::Idle && controller->attempt) p.flags|=jns::Retired;
   if (controller->state==State::Fault) p.flags|=jns::Fault;
   if (controller->mode==Mode::Standing || beam.clear(nowUs())) p.flags|=jns::Ready;

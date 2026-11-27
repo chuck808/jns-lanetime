@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "controller.hpp"
+#include <lanetime/speed.hpp>
 namespace jns {
 // One lane of one attempt, as JNS SPLIT results upload v1 expects it.
 enum class Outcome : uint8_t { Completed, Dnf, Cancelled, Invalid };
@@ -25,15 +26,6 @@ struct Effort {
   Upload upload=Upload::Pending;
   char code[28]={};     // Last reply code from JNS SPLIT, for the screen and serial log.
 };
-// Rounded as on the eInk display, so the uploaded time matches what the coach saw.
-inline uint32_t wholeMs(uint64_t us) {
-  const uint64_t ms=(us+500)/1000;
-  return ms?uint32_t(ms):1;
-}
-// Average speed in tenths of km/h: metres / seconds * 3.6.
-inline uint32_t tenthsKmh(uint16_t metres,uint32_t ms) {
-  return ms?uint32_t((uint64_t(metres)*36000+ms/2)/ms):0;
-}
 class EffortQueue {
  public:
   enum : uint8_t { kCapacity=64 };

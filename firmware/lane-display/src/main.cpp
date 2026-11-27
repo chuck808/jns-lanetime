@@ -31,11 +31,9 @@ void received(const uint8_t* mac,const uint8_t* bytes,int size) {
     portENTER_CRITICAL(&inboxLock); lost=true; portEXIT_CRITICAL(&inboxLock);
   }
 }
-void paint(const char* text) {
-  static char previous[8]={};
-  if (!strcmp(previous,text)) return;
-  snprintf(previous,sizeof(previous),"%s",text);
-  // Explicit fixed-width numeric font ensures 30.000 fits, independent of library fonts.
+// Explicit fixed-width numeric font ensures 30.000 fits, independent of library fonts.
+// Letters (KM/H, DNF and so on) come from the library's font.
+uint8_t layout(const char* text,uint8_t (&columns)[96]) {
   static const uint8_t digits[10][5]={
     {0x3e,0x51,0x49,0x45,0x3e},{0x00,0x42,0x7f,0x40,0x00},
     {0x62,0x51,0x49,0x49,0x46},{0x22,0x41,0x49,0x49,0x36},
@@ -43,19 +41,42 @@ void paint(const char* text) {
     {0x3c,0x4a,0x49,0x49,0x30},{0x01,0x71,0x09,0x05,0x03},
     {0x36,0x49,0x49,0x49,0x36},{0x06,0x49,0x49,0x29,0x1e}
   };
-  uint8_t columns[32]={}, count=0;
+  uint8_t count=0;
   for (const char* c=text;*c;++c) {
     uint8_t glyph[8]={}; uint8_t width;
     if (*c>='0' && *c<='9') { width=5; memcpy(glyph,digits[*c-'0'],5); }
     else if (*c=='.') { width=1; glyph[0]=0x40; }
+    else if (*c==' ') { width=2; }
     else width=matrix.getChar(*c,sizeof(glyph),glyph);
-    if (count && count<32) columns[count++]=0;
-    for (uint8_t i=0;i<width && count<32;++i) columns[count++]=glyph[i];
+    if (count && count<sizeof(columns)) columns[count++]=0;
+    for (uint8_t i=0;i<width && count<sizeof(columns);++i) columns[count++]=glyph[i];
   }
+  return count;
+}
+// Draws text with its left edge at column left (may be off either side), or centred.
+void paint(const char* text,bool centred=true,int16_t left=0) {
+  static char previous[16]={};
+  static int16_t previousLeft=-999;
+  if (centred) left=-999;
+  if (!strcmp(previous,text) && previousLeft==left) return;
+  snprintf(previous,sizeof(previous),"%s",text); previousLeft=left;
+  uint8_t columns[96]={};
+  const uint8_t count=layout(text,columns);
+  if (centred) left=int16_t((32-int16_t(count>32?32:count))/2);
   matrix.control(MD_MAX72XX::UPDATE,MD_MAX72XX::OFF); matrix.clear();
-  const uint8_t left=(32-count)/2;
-  for (uint8_t i=0;i<count;++i) matrix.setColumn(31-left-i,columns[i]);
+  for (uint8_t i=0;i<count;++i) {
+    const int16_t x=left+i;
+    if (x>=0 && x<32) matrix.setColumn(31-x,columns[i]);
+  }
   matrix.control(MD_MAX72XX::UPDATE,MD_MAX72XX::ON);
+}
+// The time held still, with the speed scrolling across between holds.
+void show(DisplayState state,uint64_t elapsed,uint8_t metres,uint64_t sinceReveal,bool synced) {
+  char text[8]; displayText(state,elapsed,synced,text);
+  char speed[16]; uint8_t columns[96];
+  const bool haveSpeed=speedText(state,elapsed,metres,speed);
+  const Frame f=resultFrame(sinceReveal,haveSpeed?layout(speed,columns):0,haveSpeed);
+  if (f.scroll) paint(speed,false,f.left); else paint(text);
 }
 void setup() {
   Serial.begin(115200); matrix.begin(); matrix.control(MD_MAX72XX::INTENSITY,JNS_MATRIX_INTENSITY);
@@ -69,8 +90,12 @@ void setup() {
 }
 void loop() {
   if (JNS_DISPLAY_BENCH) {
-    const char* frames[]={"TEST","1.750","12.345","30.000","DNF","ERR","----"};
-    paint(frames[(nowUs()/3000000)%7]); delay(1); return;
+    // Static frames, then a revealed 30 m time with its scrolling speed.
+    const char* frames[]={"TEST","01.750","12.345","30.000","DNF","ERR","----"};
+    const uint64_t t=nowUs()%33000000;
+    if (t<21000000) paint(frames[t/3000000]);
+    else show(DisplayState::Time,2004000,30,t-21000000,true);
+    delay(1); return;
   }
   display.tick(nowUs());
   portENTER_CRITICAL(&inboxLock); const bool overflow=lost; lost=false; portEXIT_CRITICAL(&inboxLock);
@@ -87,6 +112,7 @@ void loop() {
     }
   }
   const uint64_t now=nowUs(); display.tick(now);
-  char text[8]; displayText(display.state(),display.elapsed(),display.synced(now),text); paint(text);
+  const uint64_t since=now>display.revealedAt()?now-display.revealedAt():0;
+  show(display.state(),display.elapsed(),display.distance(),since,display.synced(now));
   delay(1);
 }

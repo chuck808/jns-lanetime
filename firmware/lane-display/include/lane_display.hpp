@@ -13,6 +13,9 @@ class LaneDisplay {
   }
   DisplayState state() const { return state_; }
   uint64_t elapsed() const { return elapsed_; }
+  // Metres set on ST-1 for the revealed attempt (0 = not set), and when it was revealed.
+  uint8_t distance() const { return distance_; }
+  uint64_t revealedAt() const { return revealLocal_; }
   bool synced(uint64_t now) const { return online_ && clock_.ready(now); }
   void overflow() { lock(); }
   void hardwareFault() { lock(); }
@@ -66,7 +69,7 @@ class LaneDisplay {
         // A Reveal alone must never resurrect a missed/retired attempt.
         if (p.kind!=Kind::Status && p.kind!=Kind::Arm && p.kind!=Kind::Cancel) return;
         attempt_=p.attempt; mode_=p.mode; mask_=p.mask; adoptedAt_=at;
-        terminal_=false; scheduled_=haveResult_=peer_=false; elapsed_=0;
+        terminal_=false; scheduled_=haveResult_=peer_=false; elapsed_=0; distance_=0;
         state_=(mask_&laneBit())?DisplayState::Pending:DisplayState::Disabled;
       }
       if (!attempt_) return;
@@ -77,12 +80,12 @@ class LaneDisplay {
       if (terminal_ || state_!=DisplayState::Pending) return;
       if (p.kind==Kind::Reveal) {
         if (scheduled_) {
-          if (p.value!=revealRemote_ || p.finishedMask!=finished_) invalidate();
+          if (p.value!=revealRemote_ || p.finishedMask!=finished_ || p.distance!=distance_) invalidate();
           return;
         }
         if (!clock_.ready(at) || !clock_.toLocal(p.value,revealLocal_) ||
             revealLocal_<=at || revealLocal_-at>2000000) { invalidate(); return; }
-        revealRemote_=p.value; finished_=p.finishedMask; scheduled_=true;
+        revealRemote_=p.value; finished_=p.finishedMask; distance_=p.distance; scheduled_=true;
       }
       return;
     }
@@ -108,7 +111,7 @@ class LaneDisplay {
   }
   void lock() { invalidate(); locked_=true; state_=DisplayState::Fault; }
   uint32_t system_, attempt_=0, controllerBoot_=0, finishBoot_=0;
-  uint8_t lane_, controller_[6]={}, finish_[6]={}, mask_=0, finished_=0, retiredCount_=0;
+  uint8_t lane_, controller_[6]={}, finish_[6]={}, mask_=0, finished_=0, retiredCount_=0, distance_=0;
   uint64_t session_=0, retired_[8]={}, lastStatus_=0, lastRemote_=0, adoptedAt_=0,
       finishSeen_=0, elapsed_=0, revealLocal_=0, revealRemote_=0;
   bool bound_=false, online_=false, terminal_=false, scheduled_=false,

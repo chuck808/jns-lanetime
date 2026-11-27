@@ -4,16 +4,16 @@
 - `include/lanetime/protocol.hpp`: wire contract encoder/decoder (below).
 - `include/lanetime/timebase.hpp`: ST-1 timebase tracking (specification §5.1). Native tests: `sh firmware/shared/tests/run.sh`. Callers must serialise `sample()` (radio callback) against conversions (main loop).
 
-# Prototype wire contract v3
+# Prototype wire contract v4
 
 `include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. Controller, external starts, all four finishes and lane displays use this contract; spare firmware remains unimplemented. This contract may change during bench testing and has no JNS_Timing code dependency.
 
-ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-endian, explicitly encoded; no packed structs or native-endian assumptions.
+ESP-NOW broadcast uses an exact 41-byte payload. Integers are unsigned little-endian, explicitly encoded; no packed structs or native-endian assumptions.
 
 | Offset | Bytes | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `JNSL` |
-| 4 | 1 | Version = 3 (v1/v2 are rejected) |
+| 4 | 1 | Version = 4 (earlier versions are rejected) |
 | 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7 |
 | 6 | 1 | Sender role: Controller=1, Start=2, Finish=3 |
 | 7 | 1 | Sender lane 1–4; controller always lane 1 |
@@ -26,6 +26,9 @@ ESP-NOW broadcast uses an exact 40-byte payload. Integers are unsigned little-en
 | 27 | 1 | Reveal: finished-lane mask, bits 0–3; otherwise reserved, zero |
 | 28 | 8 | See *Value field* below |
 | 36 | 4 | Sender boot token, random nonzero per boot |
+| 40 | 1 | Distance in metres set on ST-1, in controller packets; 0 = not set. Must be 0 from start and finish posts |
+
+v4 added byte 40 so lane displays can show average speed. Reflash every unit together: v3 units cannot decode v4 packets.
 
 ## Value field
 
@@ -58,7 +61,7 @@ Result comes from the matching finish sensor, with its own role/lane/boot token,
 
 ST-1 sends Reveal once it holds every enabled lane's Result, or when the coach presses reveal now. It freezes the result set and schedules the reveal 1 s ahead, then submits Reveal immediately and every 100 ms until that instant. Busy/failed submissions are retried; the timestamp and mask never change. Each display holds its own lane's Result and shows it at the reveal time, converted through its timebase, not on receipt. A lane whose bit is clear in the finished-lane mask shows DNF. Displays show only their own lane's time. A set bit with no matching Result means missing data, not DNF: show an explicit unavailable indication. A display must receive at least one Reveal before its deadline for a synchronised reveal; receive-only broadcast cannot guarantee delivery.
 
-Reveal uses byte 27 for a finished mask that must be a subset of the enabled mask (zero means all DNF). It must come from Controller lane 1 and have nonzero session, attempt, reveal time and boot token. Other packets still require byte 27 to be zero. The existing 40-byte v3 layout is retained; all units must be reflashed together; v2 packets are rejected.
+Reveal uses byte 27 for a finished mask that must be a subset of the enabled mask (zero means all DNF). It must come from Controller lane 1 and have nonzero session, attempt, reveal time and boot token. Other packets still require byte 27 to be zero. All units must be reflashed together when the version changes.
 
 ST-1 keeps configuration locked and eInk refresh suspended during its reveal lead-in. CANCEL and faults abort the scheduled reveal. The 30-second deadline applies to collecting results; a reveal scheduled by that deadline may finish its one-second lead-in afterwards. Required sensor readiness/identity checks remain active until the reveal.
 

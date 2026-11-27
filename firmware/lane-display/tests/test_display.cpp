@@ -160,13 +160,41 @@ void wireToFourDisplays() {
   assert(displays[3].state()==DisplayState::Dnf);
 }
 void formatting() {
-  char out[8]; displayText(DisplayState::Time,1750000,true,out); assert(!strcmp(out,"1.750"));
+  char out[8]; displayText(DisplayState::Time,1750000,true,out); assert(!strcmp(out,"01.750"));
   displayText(DisplayState::Time,9999500,true,out); assert(!strcmp(out,"10.000"));
   displayText(DisplayState::Time,30000000,true,out); assert(!strcmp(out,"30.000"));
   displayText(DisplayState::Time,30000001,true,out); assert(!strcmp(out,"ERR"));
   displayText(DisplayState::Dnf,0,true,out); assert(!strcmp(out,"DNF"));
   displayText(DisplayState::Pending,0,false,out); assert(!strcmp(out,"SYNC"));
   displayText(DisplayState::Offline,0,false,out); assert(!strcmp(out,"----"));
+  displayText(DisplayState::Time,500,true,out); assert(!strcmp(out,"00.001"));
+}
+void speedAndScroll() {
+  char speed[16];
+  assert(speedText(DisplayState::Time,2000000,30,speed) && !strcmp(speed,"54.0 KM/H"));
+  assert(speedText(DisplayState::Time,1750400,10,speed) && !strcmp(speed,"20.6 KM/H"));  // 1.750 s shown.
+  assert(speedText(DisplayState::Time,30000000,50,speed) && !strcmp(speed,"6.0 KM/H"));
+  assert(!speedText(DisplayState::Time,2000000,0,speed));    // No distance from ST-1.
+  assert(!speedText(DisplayState::Dnf,2000000,30,speed));
+  assert(!speedText(DisplayState::Time,30000001,30,speed));
+  assert(!speedText(DisplayState::Time,900000,255,speed));  // 1020 km/h: a bad reading.
+  // Hold the time 4 s, scroll the speed in from the right and off the left, repeat.
+  assert(!resultFrame(0,50,true).scroll && !resultFrame(3999999,50,true).scroll);
+  Frame f=resultFrame(4000000,50,true); assert(f.scroll && f.left==32);
+  f=resultFrame(4000000+40000*10,50,true); assert(f.scroll && f.left==22);
+  f=resultFrame(4000000+40000*81,50,true); assert(f.scroll && f.left==-49);  // Last column leaving.
+  assert(!resultFrame(4000000+40000*82,50,true).scroll);  // Next cycle: time again.
+  assert(!resultFrame(5000000,50,false).scroll && !resultFrame(5000000,0,true).scroll);
+  // The distance travels in ST-1's Reveal; a contradicting repeat invalidates.
+  { Fixture f2; f2.warm(); f2.arm(); f2.result(); f2.c.distance=30; f2.reveal(); f2.advance(); f2.advance();
+    assert(f2.d.state()==DisplayState::Time && f2.d.distance()==30 && f2.d.revealedAt());
+    f2.arm(2); assert(!f2.d.distance()); }
+  { Fixture f2; f2.warm(); f2.arm(); f2.result(); f2.c.distance=30; f2.reveal(); f2.c.distance=20; f2.reveal();
+    assert(f2.d.state()==DisplayState::Unavailable); }
+  // Only ST-1 may carry a distance.
+  Packet p; p.system=42; p.session=1; p.boot=1; p.role=Role::Finish; p.distance=30;
+  uint8_t b[kPacketSize]; encode(p,b); Packet q; assert(!decode(b,sizeof(b),q));
+  p.role=Role::Controller; encode(p,b); assert(decode(b,sizeof(b),q) && q.distance==30 && b[4]==4);
 }
 void lostCancelRecovery() {
   for (bool revealed:{false,true}) {
@@ -181,6 +209,7 @@ void lostCancelRecovery() {
   }
 }
 int main() {
+  speedAndScroll();
   lostCancelRecovery();
   happyPath(); masksAndMissingData(); filtering(); cancellations(); identities();
   expiryAndRevealValidation(); wireToFourDisplays(); formatting(); puts("All lane-display tests passed");
