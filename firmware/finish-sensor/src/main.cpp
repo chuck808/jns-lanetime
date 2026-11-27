@@ -6,6 +6,7 @@
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <esp_arduino_version.h>
 #include "finish_sensor.hpp"
 #ifndef JNS_SYNC_BENCH
 #define JNS_SYNC_BENCH 0
@@ -36,8 +37,14 @@ void IRAM_ATTR beamEdge() {
   }
   if (wake) portYIELD_FROM_ISR();
 }
+#if ESP_ARDUINO_VERSION_MAJOR>=3
+void received(const esp_now_recv_info_t* info,const uint8_t* data,int length) {
+  const uint64_t at=nowUs();
+  const uint8_t* mac=info->src_addr;
+#else
 void received(const uint8_t* mac,const uint8_t* data,int length) {
   const uint64_t at=nowUs();
+#endif
   if (length!=int(kPacketSize)) return;
   Input r; r.at=at; memcpy(r.mac,mac,6); memcpy(r.bytes,data,kPacketSize);
   if (xQueueSend(inbox,&r,0)!=pdTRUE) {
@@ -74,10 +81,17 @@ void setup() {
       esp_now_register_send_cb(sent)==ESP_OK && esp_now_add_peer(&peer)==ESP_OK;
   if (!radioReady) sensor->hardwareFault();
   if (!JNS_SYNC_BENCH) {
+#if ESP_ARDUINO_VERSION_MAJOR>=3
+    // Core 3.x LEDC is addressed by pin; the channel is allocated automatically.
+    const double hz=ledcAttach(JNS_IR_TX,38000,8)?ledcReadFreq(JNS_IR_TX):0;
+    if (hz<37500 || hz>38500) sensor->hardwareFault();
+    else if (radioReady) ledcWrite(JNS_IR_TX,128);
+#else
     const double hz=ledcSetup(0,38000,8);
     ledcAttachPin(JNS_IR_TX,0);
     if (hz<37500 || hz>38500) sensor->hardwareFault();
     else if (radioReady) ledcWrite(0,128);
+#endif
   }
   sensor->edge(digitalRead(JNS_IR_RX)!=LOW,nowUs());
   attachInterrupt(digitalPinToInterrupt(JNS_IR_RX),beamEdge,CHANGE);
