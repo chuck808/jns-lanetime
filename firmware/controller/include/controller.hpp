@@ -10,6 +10,16 @@ constexpr uint64_t kRevealLeadUs=1000000, kRevealRepeatUs=100000;
 // Standing cue schedule: lead-in for radio delivery, then three beeps 1 s apart and GO.
 constexpr uint64_t kCueLeadUs=1000000, kCueStepUs=1000000;
 constexpr uint8_t kCueBeeps=3;
+// How an attempt in which riders actually started ended. Attempts abandoned before any
+// start (preparation failures, cancelled countdowns) are not efforts and are not recorded.
+enum class Ending : uint8_t { Revealed, Cancelled, Invalid };
+struct Closed {
+  bool pending=false;
+  uint32_t attempt=0;
+  Ending ending=Ending::Revealed;
+  uint8_t mask=0, finished=0;
+  uint64_t results[4]={};
+};
 struct Peer {
   bool used=false;
   uint8_t mac[6]={};
@@ -29,8 +39,10 @@ class Controller {
   bool active() const {
     return state==State::Preparing || state==State::Armed || state==State::Countdown || state==State::Running || state==State::Revealing;
   }
-  void cancel() { state=State::Idle; started=finished=0; goAt=startAt=revealAt=0; reason="Cancelled / idle"; }
-  void fail(const char* why) { state=State::Fault; revealAt=0; reason=why; }
+  // The most recent attempt to end after a start; the firmware takes it and clears pending.
+  Closed closed;
+  void cancel() { close(Ending::Cancelled); state=State::Idle; started=finished=0; goAt=startAt=revealAt=0; reason="Cancelled / idle"; }
+  void fail(const char* why) { close(Ending::Invalid); state=State::Fault; revealAt=0; reason=why; }
   // Freeze this attempt's results/mask. Late results cannot change a scheduled reveal.
   bool reveal(uint64_t now) {
     if (state!=State::Running) return false;
@@ -138,7 +150,7 @@ class Controller {
     // After arming, local beam changes are events rather than readiness failures.
     if (const char* why=readiness(now,true,true)) { fail(why); return; }
     if (state==State::Revealing) {
-      if (now>=revealAt) { state=State::Complete; reason="Revealed - prototype times"; }
+      if (now>=revealAt) { close(Ending::Revealed); state=State::Complete; reason="Revealed - prototype times"; }
       return;
     }
     if (now-since>kAttemptUs) { fail("Attempt timeout / DNF"); return; }
@@ -161,6 +173,12 @@ class Controller {
     started|=1; startAt=at; state=State::Running; reason="Flying - running"; return true;
   }
  private:
+  void close(Ending ending) {
+    if (!active() || !started) return;
+    closed.pending=true; closed.attempt=attempt; closed.ending=ending;
+    closed.mask=mask(); closed.finished=ending==Ending::Revealed?finished:0;
+    memcpy(closed.results,results,sizeof(results));
+  }
   const Peer* find(uint64_t now,Role role,uint8_t lane) const {
     const Peer* found=nullptr;
     for (const auto& x:peers_) if (x.used && now-x.seen<=kPeerUs && x.packet.role==role && x.packet.lane==lane) found=&x;

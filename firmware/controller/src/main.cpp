@@ -12,6 +12,8 @@
 #include "controller.hpp"
 #include "beam.hpp"
 #include "button.hpp"
+#include "efforts.hpp"
+#include "upload.hpp"
 #include <lanetime/cue_player.hpp>
 #include <freertos/semphr.h>
 #ifndef JNS_BENCH
@@ -39,6 +41,12 @@ uint64_t sessionId=0, lastHeartbeat=0, lastArmSend=0, lastPaint=0, toneUntil=0;
 uint64_t lastPixels=0, cancelUntil=0, lastCancel=0, lastGoSend=0, lastStartSend=0;
 uint64_t lastRevealSend=0, sentRevealAt=0;
 uint32_t bootId=0;
+// Preset distances for the MODE hold. JNS SPLIT takes the distance from its own session,
+// so set the session to match: this one is for the coach's screen and the speed figure.
+constexpr uint16_t kDistances[]={10,20,30,50};
+uint16_t distance=kDistances[0];
+EffortQueue efforts;
+char notice[64]="";
 bool dirty=true, radioReady=false, fatalHardware=false;
 struct Received { uint8_t mac[6]; uint8_t data[kPacketSize]; uint64_t at; };
 struct Edge { bool broken; uint64_t at; };
@@ -173,28 +181,76 @@ void paint() {
   display.setTextSize(2); display.setCursor(0,0);
   display.println(JNS_BENCH ? "JNS ST-1  BENCH" : "JNS LaneTime ST-1");
   display.setTextSize(1); display.setCursor(0,24);
-  display.printf("%s | Lanes 1-%u | Attempt %lu\n",controller->mode==Mode::Flying?"FLYING":"STANDING",controller->lanes,(unsigned long)controller->attempt);
-  display.setCursor(0,40); display.println(stateName(controller->state)); display.println(controller->reason);
-  display.printf("Lane 1 beam: %s\n",beam.clear(nowUs())?"CLEAR":"BROKEN / settling");
+  display.printf("%s | Lanes 1-%u | %u m | Attempt %lu",controller->mode==Mode::Flying?"FLYING":"STANDING",
+    controller->lanes,distance,(unsigned long)controller->attempt);
+  display.setCursor(0,36); display.print(stateName(controller->state));
+  display.setCursor(0,46); display.print(controller->reason);
+  display.setCursor(0,56); display.printf("Lane 1 beam: %s   To upload: %u",beam.clear(nowUs())?"CLEAR":"BROKEN",efforts.pending());
   if (controller->state==State::Complete) {
     for (uint8_t i=0;i<controller->lanes;++i) {
+      display.setCursor(0,68+10*i);
       if (controller->finished&(1U<<i)) {
-        const uint64_t rounded=(controller->results[i]+500)/1000;
-        display.printf("L%u: %lu.%03lu s  ",i+1,(unsigned long)(rounded/1000),(unsigned long)(rounded%1000));
-      } else display.printf("L%u: DNF  ",i+1);
-      if (i%2) display.println();
+        const uint32_t ms=wholeMs(controller->results[i]), kmh=tenthsKmh(distance,ms);
+        display.printf("L%u  %lu.%03lu s   %lu.%lu km/h",i+1,(unsigned long)(ms/1000),(unsigned long)(ms%1000),
+          (unsigned long)(kmh/10),(unsigned long)(kmh%10));
+      } else display.printf("L%u  DNF",i+1);
     }
   } else {
-    display.println("LIVE LEDs: green=armed blue=run red=invalid");
-    display.println("Prototype - timing accuracy unverified");
+    display.setCursor(0,68); display.print("LIVE LEDs: green=armed blue=run red=invalid");
+    display.setCursor(0,78); display.print("Prototype - timing accuracy unverified");
   }
-  display.setCursor(0,110); display.println("MODE    LANES    CANCEL    ARM / GO");
+  display.setCursor(0,112); display.print("MODE/hold:dist LANES CANCEL/hold:upload GO");
   display.display(); dirty=false; lastPaint=nowUs();
 }
 void saveSettings() {
   preferences.putUChar("mode",uint8_t(controller->mode)); preferences.putUChar("lanes",controller->lanes);
+  preferences.putUShort("dist",distance);
 }
 Button button[4];
+void startRadio() {
+  esp_now_peer_info_t peer{}; memcpy(peer.peer_addr,broadcastMac,6);
+  peer.channel=JNS_RADIO_CHANNEL; peer.ifidx=WIFI_IF_STA; peer.encrypt=false;
+  radioReady=esp_wifi_set_channel(JNS_RADIO_CHANNEL,WIFI_SECOND_CHAN_NONE)==ESP_OK &&
+    esp_now_init()==ESP_OK && esp_now_register_recv_cb(received)==ESP_OK &&
+    esp_now_register_send_cb(sent)==ESP_OK && esp_now_add_peer(&peer)==ESP_OK;
+  if (!radioReady) { controller->fail("Radio setup failed"); fatalHardware=true; }
+}
+// Queue each attempt that riders started, as it ends. Room is checked before arming.
+void takeClosed() {
+  if (!controller->closed.pending) return;
+  controller->closed.pending=false;
+  if (!efforts.add(controller->closed,bootId,distance)) {
+    if (Serial.availableForWrite()>80) Serial.println("EFFORTS not queued: queue full");
+    return;
+  }
+  uint8_t added=0;
+  for (uint8_t lane=0;lane<4;++lane) if (controller->closed.mask&(1U<<lane)) ++added;
+  for (uint8_t i=efforts.size()-added;i<efforts.size();++i) {
+    const Effort& e=efforts.at(i);
+    if (Serial.availableForWrite()>80) Serial.printf("EFFORT %s lane=%u %s %lu ms %u m\n",
+      e.id,e.lane,outcomeName(e.outcome),(unsigned long)e.ms,e.distance);
+  }
+}
+// The JNS Pro pattern: timing radio off, Wi-Fi on to upload, then timing radio back on.
+// Sensors lose ST-1's heartbeat meanwhile and need about 8 s to be Ready again.
+void uploadSession() {
+  efforts.compact();
+  if (!efforts.pending()) {
+    snprintf(notice,sizeof(notice),"Nothing to upload"); controller->reason=notice; dirty=true; return;
+  }
+  snprintf(notice,sizeof(notice),"Uploading %u - timing radio paused",efforts.pending());
+  controller->reason=notice; paint();
+  if (!JNS_BENCH) { esp_now_deinit(); radioReady=false; }
+  const UploadSummary s=uploadPending(efforts);
+  if (!JNS_BENCH) startRadio();
+  lastHeartbeat=0;
+  if (!s.configured || !s.connected) snprintf(notice,sizeof(notice),"Upload failed: %s",s.stopCode);
+  else if (s.stopCode[0]) snprintf(notice,sizeof(notice),"Saved %u, refused %u, %u left: %s",s.saved,s.rejected,s.left,s.stopCode);
+  else snprintf(notice,sizeof(notice),"Saved %u, refused %u, %u left",s.saved,s.rejected,s.left);
+  controller->reason=notice;
+  if (Serial.availableForWrite()>80) Serial.printf("UPLOAD done: %s\n",notice);
+  efforts.compact(); dirty=true; lastPaint=0;
+}
 void benchPeers(uint64_t now) {
   if (!JNS_BENCH) return;
   for (uint8_t lane=1;lane<=controller->lanes;++lane) for (Role role:{Role::Start,Role::Finish}) {
@@ -203,6 +259,19 @@ void benchPeers(uint64_t now) {
     p.flags=jns::Ready | (controller->active()?jns::Armed:0);
     if (controller->goAt) { p.flags|=jns::Cued; p.value=controller->goAt; }
     uint8_t mac[]={2,0,0,0,uint8_t(role),lane}; controller->observe(mac,p,now);
+  }
+  // Simulated finishes a few seconds after each started lane, so a bench run produces
+  // completed efforts to upload. Flying lane 1 starts from the real local beam.
+  if (controller->state!=State::Running) return;
+  for (uint8_t lane=1;lane<=controller->lanes;++lane) {
+    const uint8_t bit=uint8_t(1U<<(lane-1));
+    if (!(controller->started&bit) || (controller->finished&bit) || (controller->mode==Mode::Flying && lane>1)) continue;
+    const uint64_t from=controller->mode==Mode::Flying?controller->startAt:controller->goAt;
+    const uint64_t elapsed=2400000+uint64_t(lane)*173000+uint64_t(controller->attempt%7)*31000;
+    if (now<from+elapsed) continue;
+    auto p=packet(Kind::Result); p.role=Role::Finish; p.lane=lane; p.boot=100+lane+10*uint8_t(Role::Finish);
+    p.flags=jns::Complete; p.value=elapsed;
+    uint8_t mac[]={2,0,0,0,uint8_t(Role::Finish),lane}; controller->observe(mac,p,now);
   }
 }
 void setup() {
@@ -223,15 +292,12 @@ void setup() {
   controller->mode=preferences.getUChar("mode",0)==1?Mode::Standing:Mode::Flying;
   controller->lanes=preferences.getUChar("lanes",1);
   if (controller->lanes<1 || controller->lanes>4) controller->lanes=1;
+  distance=preferences.getUShort("dist",kDistances[0]);
+  bool known=false;
+  for (auto d:kDistances) known|=d==distance;
+  if (!known) distance=kDistances[0];
   if (!radioQueue || !edgeQueue) { controller->fail("Queue allocation failed"); fatalHardware=true; }
-  if (!JNS_BENCH && !fatalHardware) {
-    esp_now_peer_info_t peer{}; memcpy(peer.peer_addr,broadcastMac,6);
-    peer.channel=JNS_RADIO_CHANNEL; peer.ifidx=WIFI_IF_STA; peer.encrypt=false;
-    radioReady=esp_wifi_set_channel(JNS_RADIO_CHANNEL,WIFI_SECOND_CHAN_NONE)==ESP_OK &&
-      esp_now_init()==ESP_OK && esp_now_register_recv_cb(received)==ESP_OK &&
-      esp_now_register_send_cb(sent)==ESP_OK && esp_now_add_peer(&peer)==ESP_OK;
-    if (!radioReady) { controller->fail("Radio setup failed"); fatalHardware=true; }
-  }
+  if (!JNS_BENCH && !fatalHardware) startRadio();
   const double irHz=ledcSetup(irChannel,38000,8);
   ledcAttachPin(txPin,irChannel); ledcWrite(irChannel,0);
   const double soundHz=ledcSetup(soundChannel,2000,8);
@@ -281,30 +347,46 @@ void loop() {
   portEXIT_CRITICAL(&radioLock);
   if (radioError && controller->active()) controller->fail("Radio queue / send fault");
   bool pressed[4];
+  const bool idle=!controller->active() && !fatalHardware;
   for (int i=0;i<4;++i) pressed[i]=button[i].update(digitalRead(buttons[i])==LOW,now,
-      i==3 && before==State::Running && controller->state==State::Running);
+      i==3 ? before==State::Running && controller->state==State::Running : (i==0 || i==2) && idle);
   const bool revealHeld=button[3].held(now);
+  // MODE: tap switches Flying/Standing; hold cycles the distance. CANCEL: hold uploads.
+  const bool modeTap=button[0].tapped(), distanceHeld=button[0].held(now);
+  const bool uploadHeld=button[2].held(now,2000000);
   // CANCEL wins over simultaneous GO.
   if (pressed[2] && !fatalHardware) {
     controller->cancel(); cancelUntil=now+2000000; transmit(Kind::Cancel); dirty=true;
   } else if (!fatalHardware) {
     if (revealHeld) controller->reveal(now);
-    if (!controller->active() && (pressed[0] || pressed[1])) {
+    if (!controller->active() && (modeTap || distanceHeld || pressed[1])) {
       const bool retire=controller->state!=State::Idle;
       controller->cancel();
       if (retire) { cancelUntil=now+2000000; transmit(Kind::Cancel); }
-      if (pressed[0]) controller->mode=controller->mode==Mode::Flying?Mode::Standing:Mode::Flying;
+      if (modeTap) controller->mode=controller->mode==Mode::Flying?Mode::Standing:Mode::Flying;
+      if (distanceHeld) {
+        uint8_t next=0;
+        for (uint8_t i=0;i<sizeof(kDistances)/sizeof(kDistances[0]);++i) if (kDistances[i]==distance) next=i+1;
+        distance=kDistances[next%(sizeof(kDistances)/sizeof(kDistances[0]))];
+      }
       if (pressed[1]) controller->lanes=controller->lanes%4+1;
       saveSettings(); dirty=true;
     }
+    if (uploadHeld && !controller->active() && now>=cancelUntil) uploadSession();
     if (pressed[3]) {
       if (controller->state==State::Armed && controller->mode==Mode::Standing) {
         if (controller->countdown(now)) { stopCues(); lastGoSend=0; if (transmit(Kind::Go,controller->goAt)) lastGoSend=nowUs(); }
       } else if (!controller->active()) {
-        // No eInk refresh here: it would age readiness observations before ARM.
-        now=nowUs(); benchPeers(now);
-        if (controller->arm(now,beam.clear(now))) { cancelUntil=0; lastArmSend=0; }
-        else dirty=true;
+        // Never start an attempt whose efforts could not be kept.
+        if (efforts.room()<controller->lanes) {
+          snprintf(notice,sizeof(notice),"Upload queue full - hold CANCEL to upload");
+          controller->reason=notice; dirty=true;
+        } else {
+          // No eInk refresh here: it would age readiness observations before ARM.
+          now=nowUs(); benchPeers(now);
+          if (controller->arm(now,beam.clear(now))) { cancelUntil=0; lastArmSend=0; }
+          else dirty=true;
+        }
       }
     }
   }
@@ -324,6 +406,7 @@ void loop() {
     if (!controller->cued(now) && now-lastGoSend>=250000 && transmit(Kind::Go,controller->goAt)) lastGoSend=now;
     if (!scheduledGo && controller->cued(now)) scheduleCues(controller->goAt);
   }
+  takeClosed();
   if (controller->startPending(now) && now-lastStartSend>=100000 && transmit(Kind::Start,controller->startAt)) lastStartSend=now;
   if (controller->state!=before) {
     dirty=true;
