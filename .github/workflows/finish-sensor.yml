@@ -20,4 +20,4 @@ jobs:
       - run: sh firmware/lane-display/tests/run.sh
       - run: sh firmware/finish-sensor/tests/run.sh
       - run: sh firmware/start-sensor/tests/run.sh
-      - run: pio run -d firmware/finish-sensor -e c3_fn1 -e c3_fn2 -e c3_fn3 -e c3_fn4 -e c3_fn1_sync -e c3_fn2_sync
+      - run: pio run -d firmware/finish-sensor -e c6_fn1 -e c6_fn2 -e c6_fn3 -e c6_fn4 -e c6_fn1_sync -e c3_fn1 -e c3_fn2 -e c3_fn3 -e c3_fn4 -e c3_fn1_sync -e c3_fn2_sync
