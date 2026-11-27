@@ -3,6 +3,8 @@
 #include "controller.hpp"
 #include "beam.hpp"
 #include "button.hpp"
+#include "efforts.hpp"
+#include <cstring>
 using namespace jns;
 constexpr uint64_t t=4000000;
 const uint8_t finishMac[]={2,0,0,0,3,1};
@@ -223,9 +225,93 @@ void retirementProtocol() {
   p.flags=jns::Retired; p.role=Role::Finish; encode(p,b); assert(!decode(b,sizeof(b),out));
   p.role=Role::Controller; p.kind=Kind::Arm; encode(p,b); assert(!decode(b,sizeof(b),out));
 }
+
+void tapAndHold() {
+  Button b;  // MODE: a tap acts on release; a hold fires once and suppresses the tap.
+  b.update(true,0,true); assert(b.update(true,30000,true));
+  b.update(false,100000,true); assert(!b.tapped()); b.update(false,130000,true); assert(b.tapped());
+  b.update(false,140000,true); assert(!b.tapped());  // Reported once.
+  b.update(true,200000,true); b.update(true,230000,true);
+  assert(!b.held(1229999)); assert(b.held(1230000));
+  b.update(false,1300000,true); b.update(false,1330000,true); assert(!b.tapped());
+  Button c;  // CANCEL: a two-second hold.
+  c.update(true,0,true); c.update(true,30000,true);
+  assert(!c.held(1030000,2000000)); assert(c.held(2030000,2000000)); assert(!c.held(3000000,2000000));
+  Button d;  // Pressed during an attempt and released after it: neither a hold nor a tap.
+  d.update(true,0,false); d.update(true,30000,false); assert(!d.held(5000000,2000000));
+  d.update(false,5100000,true); d.update(false,5130000,true); assert(!d.tapped());
+}
+Closed finishedRun(Controller& c,uint64_t us) {
+  prepared(c); c.localStart(t+5);
+  auto p=status(); p.kind=Kind::Result; p.attempt=c.attempt; p.flags=jns::Complete; p.value=us;
+  assert(c.observe(finishMac,p,t+10)); c.tick(t+20,true); assert(c.state==State::Revealing);
+  assert(!c.closed.pending);  // Not until the reveal: CANCEL in the lead-in still discards it.
+  c.tick(c.revealAt,true); assert(c.state==State::Complete && c.closed.pending);
+  return c.closed;
+}
+void closedAttempts() {
+  { Controller c(42,99); Closed x=finishedRun(c,1750400);
+    assert(x.ending==Ending::Revealed && x.attempt==1 && x.mask==1 && x.finished==1 && x.results[0]==1750400);
+    c.closed.pending=false; c.cancel(); assert(!c.closed.pending); }  // Clearing a result is not a new effort.
+  { Controller c(42,99); prepared(c); c.cancel(); assert(!c.closed.pending); }  // Nobody started.
+  { Controller c(42,99); c.mode=Mode::Standing; prepared(c); c.countdown(t+100); c.cancel();
+    assert(!c.closed.pending); }  // Cancelled before GO.
+  { Controller c(42,99); prepared(c); c.localStart(t+5); c.cancel();
+    assert(c.closed.pending && c.closed.ending==Ending::Cancelled && !c.closed.finished); }
+  { Controller c(42,99); prepared(c); c.localStart(t+5); c.tick(t+kAttemptUs+1,true);
+    assert(c.state==State::Fault && c.closed.pending && c.closed.ending==Ending::Invalid); }
+  { Controller c(42,99); prepared(c); c.localStart(t+5); c.reveal(t+6); c.cancel();
+    assert(c.closed.ending==Ending::Cancelled); }  // Discarded during the reveal lead-in.
+  { Controller c(42,99); prepared(c); c.localStart(t+5); c.reveal(t+6); c.tick(c.revealAt,true);
+    assert(c.closed.ending==Ending::Revealed && !c.closed.finished); }  // Early reveal: DNF.
+}
+void effortQueue() {
+  assert(wholeMs(1750400)==1750 && wholeMs(1750500)==1751 && wholeMs(200)==1);
+  assert(tenthsKmh(30,2000)==540 && tenthsKmh(50,0)==0 && tenthsKmh(10,1234)==292);
+  EffortQueue q; Closed c; c.attempt=42; c.mask=0x3; c.finished=0x1; c.results[0]=1405400;
+  assert(q.add(c,0x1A2B3C4D,30) && q.size()==2 && q.pending()==2);
+  assert(!strcmp(q.at(0).id,"1A2B3C4D-42-L1") && !strcmp(q.at(1).id,"1A2B3C4D-42-L2"));
+  assert(q.at(0).outcome==Outcome::Completed && q.at(0).ms==1405 && q.at(0).distance==30);
+  assert(q.at(1).outcome==Outcome::Dnf && q.at(1).ms==0);
+  c.ending=Ending::Invalid; c.mask=1; c.attempt=43; assert(q.add(c,0x1A2B3C4D,30));
+  assert(q.at(2).outcome==Outcome::Invalid && q.at(2).ms==0);
+  c.ending=Ending::Cancelled; c.attempt=44; assert(q.add(c,1,30) && q.at(3).outcome==Outcome::Cancelled);
+  char body[384];
+  assert(effortJson(q.at(0),"7d0e8a8c-0000-4000-8000-000000000000","04A1B2C3D4E5F6",body,sizeof(body)));
+  assert(!strcmp(body,"{\"version\":1,\"resultId\":\"1A2B3C4D-42-L1\",\"sessionId\":\"7d0e8a8c-0000-4000-8000-000000000000\","
+    "\"lane\":1,\"uid\":\"04A1B2C3D4E5F6\",\"outcome\":\"completed\",\"elapsedMs\":1405}"));
+  assert(effortJson(q.at(1),"s","u",body,sizeof(body)));
+  assert(!strcmp(body,"{\"version\":1,\"resultId\":\"1A2B3C4D-42-L2\",\"sessionId\":\"s\",\"lane\":2,\"uid\":\"u\",\"outcome\":\"dnf\"}"));
+  assert(!effortJson(q.at(0),"s","u",body,20));  // Never send a truncated body.
+  q.at(0).upload=Upload::Saved; q.at(2).upload=Upload::Rejected; q.compact();
+  assert(q.size()==2 && !strcmp(q.at(0).id,"1A2B3C4D-42-L2") && q.at(1).outcome==Outcome::Cancelled);
+  // Full queue: an attempt is kept whole or not at all.
+  EffortQueue full; Closed four; four.attempt=1; four.mask=0xF;
+  for (int i=0;i<16;++i) { four.attempt=i+1; assert(full.add(four,1,10)); }
+  assert(full.room()==0 && !full.add(four,1,10) && full.size()==64);
+  Closed none; assert(!full.add(none,1,10));
+}
+void replies() {
+  char code[28];
+  assert(replyCode("{\"version\":1,\"code\":\"SAVED\",\"replay\":true}",code,sizeof(code)) && !strcmp(code,"SAVED"));
+  assert(replyCode("{\"code\" : \"TAG_UNAVAILABLE\"}",code,sizeof(code)) && !strcmp(code,"TAG_UNAVAILABLE"));
+  assert(!replyCode("<html>Bad gateway</html>",code,sizeof(code)));
+  assert(!replyCode("{\"code\":\"UNTERMINATED",code,sizeof(code)));
+  assert(!replyCode("{\"code\":\"A_VERY_LONG_CODE_THAT_DOES_NOT_FIT\"}",code,8));
+  bool stop;
+  assert(judge(200,"SAVED",stop)==Upload::Saved && !stop);
+  assert(judge(422,"NOT_IN_SESSION",stop)==Upload::Rejected && !stop);
+  assert(judge(409,"RESULT_ID_CONFLICT",stop)==Upload::Rejected && !stop);
+  assert(judge(409,"CONTROLLER_LIMIT_REACHED",stop)==Upload::Pending && stop);
+  assert(judge(503,"BACKEND_UNAVAILABLE",stop)==Upload::Pending && stop);
+  assert(judge(401,"INVALID_CREDENTIAL",stop)==Upload::Pending && stop);
+  assert(judge(-1,"NO_REPLY",stop)==Upload::Pending && stop);
+  assert(judge(200,"HTTP_200",stop)==Upload::Pending && stop);
+}
 int main() {
   retirementProtocol();
   protocol(); flying(); standing(); faults(); multilane(); optics();
   revealProtocol(); manualReveal(); revealBoundaries(); revealFaults(); holdGesture();
+  tapAndHold(); closedAttempts(); effortQueue(); replies();
   puts("All controller tests passed");
 }
