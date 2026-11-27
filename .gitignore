@@ -10,3 +10,6 @@ Thumbs.db
 build/
 __pycache__/
 *.pyc
+
+# Upload settings: Wi-Fi password and timing credential
+firmware/controller/include/upload_config.h
