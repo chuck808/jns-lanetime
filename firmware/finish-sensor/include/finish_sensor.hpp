@@ -19,6 +19,8 @@ class FinishSensor {
   uint64_t elapsed() const { return elapsed_; }
   bool clear(uint64_t now) const { return beam_.clear(now); }
   bool ready(uint64_t now) const { return !locked_ && online_ && clock_.ready(now) && clear(now) && startReady(now); }
+  // Latched fault: only a restart recovers.
+  bool faulted() const { return locked_; }
   void hardwareFault() { locked_=true; invalidate(); }
   void overflow() { hardwareFault(); } // Lost edges/control messages cannot be reconstructed.
   void edge(bool broken,uint64_t at) {

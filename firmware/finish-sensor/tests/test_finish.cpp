@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdio>
 #include "finish_sensor.hpp"
+#include "status_light.hpp"
 #include "controller.hpp"
 #include "lane_display.hpp"
 using namespace jns;
@@ -168,7 +169,35 @@ void retiredHeartbeat() {
   assert(x.f.state()==FinishState::Idle);
   x.arm(Mode::Flying,2);
 }
+void statusLights() {
+  // Unsteady: two or more breaks within one second.
+  BeamWatch w; assert(!w.unsteady(0));
+  w.broke(1000000); assert(!w.unsteady(1000001));
+  w.broke(1600000); assert(w.unsteady(1600001) && w.unsteady(1999999));
+  assert(!w.unsteady(2000000));  // The older break has left the window.
+  for (int i=0;i<6;++i) w.broke(5000000+uint64_t(i)*100000);  // Ring keeps only the latest four.
+  assert(w.unsteady(5600000) && !w.unsteady(6600000));
+  const FinishState idle=FinishState::Idle;
+  LightView v;
+  // Fault wins over everything and blinks fast.
+  v=statusLight(true,FinishState::Running,false,true,false,true,0); assert(v.colour==Light::Red && v.lit);
+  v=statusLight(true,idle,false,true,false,true,125000); assert(v.colour==Light::Red && !v.lit);
+  // During an attempt: blue, then white once the time is captured, whatever the beam does.
+  assert(statusLight(false,FinishState::Armed,true,false,true,false,0).colour==Light::Blue);
+  assert(statusLight(false,FinishState::Running,true,false,false,false,0).colour==Light::Blue);
+  assert(statusLight(false,FinishState::Complete,true,false,false,false,0).colour==Light::White);
+  // Idle alignment: no beam, unsteady or settling, clear but waiting for ST-1, ready.
+  assert(statusLight(false,idle,true,false,false,false,0).colour==Light::Red);
+  assert(statusLight(false,FinishState::Invalid,true,false,false,false,0).colour==Light::Red);
+  assert(statusLight(false,idle,false,true,true,true,0).colour==Light::Amber);
+  assert(statusLight(false,idle,false,false,false,false,0).colour==Light::Amber);
+  v=statusLight(false,idle,false,true,false,false,0); assert(v.colour==Light::Green && v.lit);
+  v=statusLight(false,idle,false,true,false,false,500000); assert(v.colour==Light::Green && !v.lit);
+  v=statusLight(false,idle,false,true,false,true,500000); assert(v.colour==Light::Green && v.lit);
+  FinishSensor f(1,2,1); assert(!f.faulted()); f.hardwareFault(); assert(f.faulted());
+}
 int main() {
+  statusLights();
   retiredHeartbeat();
   flyingAndLateStart(); wheelPassage(); standingAndStrays(); invalidationAndRecovery(); filtersAndReboots();
   beamAndReveal(); endToEnd(); puts("All FN-1 tests passed");
