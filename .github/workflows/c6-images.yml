@@ -2,9 +2,9 @@ name: ESP32-C6 images
 # Merged images flashable at 0x0, for PCs where the local RISC-V toolchain cannot run.
 on:
   push:
-    paths: ['firmware/finish-sensor/**', 'firmware/shared/**', '.github/workflows/c6-images.yml']
+    paths: ['firmware/lane-display/**', 'firmware/finish-sensor/**', 'firmware/shared/**', '.github/workflows/c6-images.yml']
   pull_request:
-    paths: ['firmware/finish-sensor/**', 'firmware/shared/**', '.github/workflows/c6-images.yml']
+    paths: ['firmware/lane-display/**', 'firmware/finish-sensor/**', 'firmware/shared/**', '.github/workflows/c6-images.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,6 +15,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - { dir: lane-display, env: c6_lane1 }
+          - { dir: lane-display, env: c6_lane2 }
+          - { dir: lane-display, env: c6_lane3 }
+          - { dir: lane-display, env: c6_lane4 }
+          - { dir: lane-display, env: c6_bench }
           - { dir: finish-sensor, env: c6_fn1 }
           - { dir: finish-sensor, env: c6_fn2 }
           - { dir: finish-sensor, env: c6_fn3 }
