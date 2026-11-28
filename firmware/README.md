@@ -1,6 +1,6 @@
 # Firmware overview
 
-One repository, five planned firmware targets. Lane numbers are configuration values, not separate codebases. ST-1 now has an Arduino/PlatformIO MagTag prototype; lane displays now have a C3/MAX7219 prototype; FN-1–FN-4 have C3 optical/GPIO prototypes; external start sensors now have a C3 prototype; spare firmware remains outstanding. Shared code contains the wire encoder/decoder (contract v4). All units work in ST-1's timebase (specification §5).
+One repository, five planned firmware targets. Lane numbers are configuration values, not separate codebases. ST-1 now has an Arduino/PlatformIO MagTag prototype; lane displays now have a C3/MAX7219 prototype; FN-1–FN-4 have C3 optical/GPIO prototypes; external start sensors now have a C3 prototype; spare firmware remains outstanding. A coach remote now has a Beetle ESP32-C6 prototype. Shared code contains the wire encoder/decoder (contract v5). All units work in ST-1's timebase (specification §5).
 
 | Target | Devices | Responsibilities |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ One repository, five planned firmware targets. Lane numbers are configuration va
 | [start-sensor](start-sensor/) | ST-2–ST-4 | Beam detection, alignment, lane identification, timestamped START, scheduled Standing cues |
 | [finish-sensor](finish-sensor/) | FN-1–FN-4 | C3 prototypes for lanes 1–4: buffered finish edges, matching start identity, START/GO timestamps, repeated Result |
 | [spare](spare/) | Configurable spare | Lane/role controls, saved assignment, shared start/finish behaviour |
+| [remote](remote/) | Coach remote | ARM/GO and CANCEL from the start hill, mirroring ST-1's state on one light |
 | [lane-display](lane-display/) | LN-1–LN-4 | C3/MAX7219 prototype: scheduled reveal, lane/attempt filtering, DNF/missing-data and stale states |
 | [bench-sync](bench-sync/) | Test rig, not a product | Measures timebase agreement on real radios with three M5Stamp-S3s |
 | [shared](shared/) | Reusable modules | Wire contract, timebase tracking, radio, optics, timing behaviours and UI utilities |

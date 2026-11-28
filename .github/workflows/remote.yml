@@ -1,0 +1,19 @@
+name: Remote firmware
+on:
+  push:
+    paths: ['firmware/remote/**', 'firmware/shared/**', '.github/workflows/remote.yml']
+  pull_request:
+    paths: ['firmware/remote/**', 'firmware/shared/**', '.github/workflows/remote.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - run: sh firmware/remote/tests/run.sh
+      - run: pio run -d firmware/remote -e c6_remote

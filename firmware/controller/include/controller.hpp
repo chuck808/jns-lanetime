@@ -96,6 +96,10 @@ class Controller {
     return !x || x->packet.session!=session_ || x->packet.attempt!=attempt ||
       !(x->packet.flags&(jns::Running|jns::Complete));
   }
+  // An ARM now would be accepted (used for ST-1's Ready flag and remote ARM checks).
+  bool armable(uint64_t now,bool clear) const {
+    return !active() && now>=kPeerUs && attempt!=UINT32_MAX && !readiness(now,clear,false);
+  }
   bool arm(uint64_t now,bool clear) {
     if (active()) return false;
     if (now<kPeerUs) { reason="Discovering sensors"; return false; }

@@ -4,6 +4,7 @@
 #include "beam.hpp"
 #include "button.hpp"
 #include "efforts.hpp"
+#include "remotes.hpp"
 #include <cstring>
 using namespace jns;
 constexpr uint64_t t=4000000;
@@ -137,9 +138,14 @@ void revealProtocol() {
   p.lane=1; p.value=0; encode(p,b); assert(!decode(b,sizeof(b),q));
   p.value=123; p.session=0; encode(p,b); assert(!decode(b,sizeof(b),q));
   p.session=99; p.attempt=0; encode(p,b); assert(!decode(b,sizeof(b),q));
-  p.attempt=3; p.kind=Kind::Status; encode(p,b); assert(!decode(b,sizeof(b),q));
-  p.finishedMask=0; encode(p,b); assert(decode(b,sizeof(b),q) && q.finishedMask==0);
-  b[5]=8; assert(!decode(b,sizeof(b),q));
+  // Controller Status byte 27: remote-control holder 0-4 plus the ST-1 fault bit.
+  p.attempt=3; p.kind=Kind::Status; encode(p,b); assert(decode(b,sizeof(b),q) && q.finishedMask==1);
+  p.finishedMask=4|kControllerFault; encode(p,b); assert(decode(b,sizeof(b),q));
+  p.finishedMask=5; encode(p,b); assert(!decode(b,sizeof(b),q));
+  p.finishedMask=8; encode(p,b); assert(!decode(b,sizeof(b),q));
+  p.finishedMask=1; p.role=Role::Finish; p.lane=1; encode(p,b); assert(!decode(b,sizeof(b),q));  // Peers: zero.
+  p.role=Role::Controller; p.finishedMask=0; encode(p,b); assert(decode(b,sizeof(b),q) && q.finishedMask==0);
+  b[5]=9; assert(!decode(b,sizeof(b),q));
 }
 void manualReveal() {
   Controller c(42,99); c.lanes=2;
@@ -308,10 +314,85 @@ void replies() {
   assert(judge(-1,"NO_REPLY",stop)==Upload::Pending && stop);
   assert(judge(200,"HTTP_200",stop)==Upload::Pending && stop);
 }
+
+Packet remotePacket(uint32_t boot=77,uint64_t session=99,uint32_t attempt=3) {
+  Packet p; p.kind=Kind::Command; p.role=Role::Remote; p.lane=1; p.system=42; p.session=session;
+  p.attempt=attempt; p.boot=boot; return p;
+}
+Command press(Code code,uint32_t seq,uint16_t age=10) { Command c; c.code=code; c.seq=seq; c.arg=age; return c; }
+void remoteControl() {
+  const uint8_t a[6]={1,2,3,4,5,6}, b[6]={9,9,9,9,9,9}, stranger[6]={7,7,7,7,7,7};
+  Remotes r; RemoteView v; v.session=99; v.attempt=3; v.armable=true;
+  // Pairing: only within the window, first asker is the candidate, confirmed on ST-1.
+  Command pair; pair.code=Code::Pair;
+  RemoteOutcome o=r.handle(a,remotePacket(),pair,v,0); assert(!o.replies);
+  uint8_t cand[6]; assert(!r.candidate(cand));
+  r.openPairing(1000); r.handle(a,remotePacket(),pair,v,2000); r.handle(b,remotePacket(),pair,v,3000);
+  assert(r.candidate(cand) && !memcmp(cand,a,6) && r.confirm()==1 && !r.pairing(4000));
+  r.openPairing(5000); r.handle(b,remotePacket(),pair,v,6000); assert(r.confirm()==2);
+  r.openPairing(7000); r.handle(a,remotePacket(),pair,v,8000); assert(r.confirm()==1 && r.count()==2);  // Re-pair keeps slot.
+  // Unpaired senders are told so; nothing happens.
+  o=r.handle(stranger,remotePacket(),press(Code::Arm,1),v,10000);
+  assert(o.replies && o.reply==Reply::Refused && o.reason==Reason::NotPaired && o.action==RemoteAction::None);
+  // Nobody holds control: ARM refused until control is taken.
+  o=r.handle(a,remotePacket(),press(Code::Arm,1),v,11000); assert(o.reason==Reason::NotInControl && o.slot==1);
+  o=r.handle(a,remotePacket(),press(Code::TakeControl,2),v,12000); assert(o.reply==Reply::Accepted && r.holder()==1);
+  // Holder present: the other remote cannot take control, but its CANCEL always works.
+  o=r.handle(b,remotePacket(88),press(Code::TakeControl,1),v,13000); assert(o.reason==Reason::NotInControl && r.holder()==1);
+  o=r.handle(b,remotePacket(88),press(Code::Cancel,2,60000),v,14000);
+  assert(o.reply==Reply::Accepted && o.action==RemoteAction::Cancel);  // Never too late to cancel.
+  o=r.handle(b,remotePacket(88),press(Code::Arm,3),v,15000); assert(o.reason==Reason::NotInControl);
+  // Holder's ARM is acted on once; a retry is answered again without acting.
+  o=r.handle(a,remotePacket(),press(Code::Arm,3),v,16000); assert(o.reply==Reply::Accepted && o.action==RemoteAction::Arm);
+  o=r.handle(a,remotePacket(),press(Code::Arm,3),v,16040); assert(o.reply==Reply::Accepted && o.action==RemoteAction::None);
+  o=r.handle(a,remotePacket(),press(Code::Arm,2),v,16080); assert(o.reason==Reason::TooLate && o.action==RemoteAction::None);
+  // An ARM that ST-1 then could not do: its retry is refused, not re-tried.
+  o=r.handle(a,remotePacket(),press(Code::Arm,4),v,17000); assert(o.action==RemoteAction::Arm);
+  r.amend(1,Reason::NotReady); o=r.handle(a,remotePacket(),press(Code::Arm,4),v,17040);
+  assert(o.reply==Reply::Refused && o.reason==Reason::NotReady && o.action==RemoteAction::None);
+  // Late, stale or not-ready presses are refused.
+  o=r.handle(a,remotePacket(),press(Code::Go,5,kCommandMaxAgeMs+1),v,18000); assert(o.reason==Reason::TooLate);
+  o=r.handle(a,remotePacket(),press(Code::Go,6,kCommandMaxAgeMs),v,18100); assert(o.reason==Reason::NotReady);  // Not armed.
+  v.canGo=true; o=r.handle(a,remotePacket(),press(Code::Go,7),v,18200); assert(o.action==RemoteAction::Go);
+  o=r.handle(a,remotePacket(77,99,2),press(Code::Go,8),v,18300); assert(o.reason==Reason::WrongAttempt);
+  o=r.handle(a,remotePacket(77,55),press(Code::Go,9),v,18400); assert(o.reason==Reason::WrongSession);
+  v.canReveal=true; o=r.handle(a,remotePacket(),press(Code::Reveal,10),v,18500); assert(o.action==RemoteAction::Reveal);
+  v.armable=false; o=r.handle(a,remotePacket(),press(Code::Arm,11),v,18600); assert(o.reason==Reason::NotReady);
+  // A remote restart starts a new sequence.
+  o=r.handle(a,remotePacket(78),press(Code::Arm,1),v,18700); assert(o.reason==Reason::NotReady && o.replies);
+  // Hello: battery and presence, no reply.
+  Command hello; hello.code=Code::Hello; hello.arg=82;
+  o=r.handle(a,remotePacket(78),hello,v,19000); assert(!o.replies && r.battery(1)==82 && r.present(1,19000));
+  assert(!r.present(1,19000+Remotes::kPresentUs));
+  // Never during an attempt; then, once the holder has been silent 30 s, another may take over.
+  v.active=true; o=r.handle(b,remotePacket(88),press(Code::TakeControl,4),v,20000); assert(o.reason==Reason::Busy);
+  v.active=false;
+  o=r.handle(b,remotePacket(88),press(Code::TakeControl,5),v,19000+Remotes::kSilentUs-1); assert(o.reason==Reason::NotInControl);
+  o=r.handle(b,remotePacket(88),press(Code::TakeControl,6),v,19000+Remotes::kSilentUs); assert(o.reply==Reply::Accepted && r.holder()==2);
+  // ST-1's own CANCEL releases control; forgetting clears everything.
+  r.release(); assert(!r.holder());
+  uint8_t saved[24]; const uint8_t used=r.save(saved); assert(used==3);
+  Remotes back; back.restore(saved,used); assert(back.slotOf(a)==1 && back.slotOf(b)==2 && !back.holder());
+  back.forget(); assert(!back.count() && !back.slotOf(a));
+  // Pairing a fifth remote fails cleanly.
+  Remotes full; const uint8_t m[5][6]={{1},{2},{3},{4},{5}};
+  for (int i=0;i<5;++i) { full.openPairing(0); full.handle(m[i],remotePacket(),pair,v,1); assert(full.confirm()==(i<4?i+1:0)); }
+  // Command packing round-trips; nonsense is rejected.
+  Command c; c.code=Code::Go; c.reply=Reply::Refused; c.reason=Reason::TooLate; c.arg=251; c.seq=0xABCDEF;
+  Command d; assert(unpackCommand(packCommand(c),d) && d.code==Code::Go && d.reply==Reply::Refused &&
+    d.reason==Reason::TooLate && d.arg==251 && d.seq==0xABCDEF);
+  assert(!unpackCommand(0,d) && !unpackCommand(8,d) && !unpackCommand(1|(3ULL<<8),d));
+  // Wire: remotes may only send Command; Command only from remote or controller.
+  Packet w=remotePacket(); w.value=packCommand(press(Code::Arm,1)); uint8_t bytes[kPacketSize]; Packet q;
+  encode(w,bytes); assert(decode(bytes,sizeof(bytes),q) && q.role==Role::Remote && q.kind==Kind::Command);
+  w.kind=Kind::Status; encode(w,bytes); assert(!decode(bytes,sizeof(bytes),q));
+  w.kind=Kind::Command; w.role=Role::Finish; encode(w,bytes); assert(!decode(bytes,sizeof(bytes),q));
+  w.role=Role::Controller; encode(w,bytes); assert(decode(bytes,sizeof(bytes),q));
+}
 int main() {
   retirementProtocol();
   protocol(); flying(); standing(); faults(); multilane(); optics();
   revealProtocol(); manualReveal(); revealBoundaries(); revealFaults(); holdGesture();
-  tapAndHold(); closedAttempts(); effortQueue(); replies();
+  tapAndHold(); closedAttempts(); effortQueue(); replies(); remoteControl();
   puts("All controller tests passed");
 }

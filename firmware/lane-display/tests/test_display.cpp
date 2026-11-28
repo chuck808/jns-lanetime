@@ -194,7 +194,7 @@ void speedAndScroll() {
   // Only ST-1 may carry a distance.
   Packet p; p.system=42; p.session=1; p.boot=1; p.role=Role::Finish; p.distance=30;
   uint8_t b[kPacketSize]; encode(p,b); Packet q; assert(!decode(b,sizeof(b),q));
-  p.role=Role::Controller; encode(p,b); assert(decode(b,sizeof(b),q) && q.distance==30 && b[4]==4);
+  p.role=Role::Controller; encode(p,b); assert(decode(b,sizeof(b),q) && q.distance==30 && b[4]==kVersion);
 }
 void lostCancelRecovery() {
   for (bool revealed:{false,true}) {
