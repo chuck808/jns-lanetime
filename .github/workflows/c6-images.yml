@@ -1,0 +1,43 @@
+name: ESP32-C6 images
+# Merged images flashable at 0x0, for PCs where the local RISC-V toolchain cannot run.
+on:
+  push:
+    paths: ['firmware/finish-sensor/**', 'firmware/shared/**', '.github/workflows/c6-images.yml']
+  pull_request:
+    paths: ['firmware/finish-sensor/**', 'firmware/shared/**', '.github/workflows/c6-images.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dir: finish-sensor, env: c6_fn1 }
+          - { dir: finish-sensor, env: c6_fn2 }
+          - { dir: finish-sensor, env: c6_fn3 }
+          - { dir: finish-sensor, env: c6_fn4 }
+          - { dir: finish-sensor, env: c6_fn1_sync }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0 esptool==4.8.1
+      - run: pio run -d firmware/${{ matrix.dir }} -e ${{ matrix.env }}
+      - name: Merge flash image
+        run: |
+          b=firmware/${{ matrix.dir }}/.pio/build/${{ matrix.env }}
+          app0=$(find ~/.platformio/packages -path '*framework-arduinoespressif32*' -name boot_app0.bin | head -1)
+          test -n "$app0"
+          python -m esptool --chip esp32c6 merge_bin -o $b/${{ matrix.env }}-merged.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            0x0 $b/bootloader.bin 0x8000 $b/partitions.bin 0xe000 "$app0" 0x10000 $b/firmware.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.env }}
+          path: firmware/${{ matrix.dir }}/.pio/build/${{ matrix.env }}/${{ matrix.env }}-merged.bin
+          if-no-files-found: error
+          retention-days: 30
