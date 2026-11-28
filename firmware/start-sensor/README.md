@@ -1,6 +1,6 @@
 # External start sensors ST-2–ST-4
 
-Buildable ESP32-C3 prototype for lanes 2–4. ST-1 remains the MagTag controller and lane-one start. This target implements Flying beam starts and scheduled local Standing cues using the v4 wire contract. The common finish target now supports FN-1–FN-4; full four-lane hardware validation remains outstanding. Physical operation and timing accuracy are unverified.
+Buildable ESP32-C3 prototype for lanes 2–4. ST-1 remains the MagTag controller and lane-one start. This target implements Flying beam starts and scheduled local Standing cues using the v5 wire contract. The common finish target now supports FN-1–FN-4; full four-lane hardware validation remains outstanding. Physical operation and timing accuracy are unverified.
 
 ## Build
 

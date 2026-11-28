@@ -41,7 +41,7 @@ The result displays (LN-1 to LN-4) stand beyond the finish line, facing the ride
 
 ST-1's clock is the common timebase. Its 500 ms heartbeat carries its own timestamp, and every other unit continuously estimates its offset from it. Beam events and the Standing GO are exchanged as timestamps in that timebase, so START/Result delivery time is not used as the measured event time. Heartbeat delay still biases clock estimation, and packet loss can invalidate an attempt. Sync error, drift and sensing latency still need measuring; no timing accuracy is claimed yet.
 
-**Firmware upgrade:** the baseline now uses wire version 4 (v4 adds ST-1's distance so lane displays can show speed). Reflash controller, sensors, displays and bench boards together; mixed versions cannot arm. See [baseline hardening and calibration](docs/baseline-validation.md).
+**Firmware upgrade:** the baseline now uses wire version 5 (v4 added ST-1's distance for lane-display speed; v5 adds the coach remote). Reflash controller, sensors, displays and bench boards together; mixed versions cannot arm. See [baseline hardening and calibration](docs/baseline-validation.md).
 
 ## Project status
 

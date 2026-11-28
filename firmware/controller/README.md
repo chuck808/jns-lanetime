@@ -58,11 +58,23 @@ Set `JNS_SYSTEM_ID` to the same unique value across this installation and use a 
 ## Controls
 
 - **MODE (A / D15):** tap to switch Flying/Standing while inactive; hold for 1 s to step the distance through 10, 20, 30 and 50 m.
-- **LANES (B / D14):** select contiguous lanes 1 through N, N=1–4.
-- **CANCEL (C / D12):** invalidate the attempt and return to idle; takes priority over simultaneous presses. While idle, hold for 2 s to upload the session's efforts to JNS SPLIT.
+- **LANES (B / D14):** tap to select contiguous lanes 1 through N, N=1–4. While idle, hold for 3 s to pair a coach remote (see *Coach remotes*).
+- **CANCEL (C / D12):** invalidate the attempt and return to idle; takes priority over simultaneous presses. While idle it also releases remote control. While idle, hold for 2 s to upload the session's efforts to JNS SPLIT.
 - **ARM/GO (D / D11):** request a new group attempt. In Standing, press again after arming to schedule the countdown: one second of lead-in, three beeps one second apart, then GO, all at fixed instants in ST-1's clock. Flying waits for each lane's beam break. Press and hold ARM/GO for 1 s while running to schedule an early reveal; lanes without a collected Result show DNF. A short press while running does nothing. The hold must begin with a fresh press while running: holding the original ARM or GO does not trigger reveal.
 
 Mode, lane count and distance are saved. Attempts never resume after reboot. Configuration is locked while active. After completion or a fault, ARM requests a fresh attempt, or CANCEL returns to idle. Group arm applies in both modes; the simultaneous reveal (specification §7, §8.1) supersedes per-lane rearm. Both automatic and early reveals freeze the result set, then repeat a common reveal timestamp every 100 ms during a 1 s lead-in. Late results cannot change the finished mask. Configuration stays locked and eInk remains untouched until that instant; CANCEL still discards the attempt.
+
+### Coach remotes
+
+Up to four [coach remotes](../remote/) can be paired. To pair one:
+
+1. On ST-1, while idle, hold LANES for 3 s. The screen asks you to switch the remote on holding both buttons; the window lasts 30 s.
+2. Switch the remote on with both of its buttons held, and keep holding for 2 s. Its light pulses cyan.
+3. ST-1 shows `Pair remote …XXXX?`. Press ARM/GO on ST-1 to accept, or CANCEL to close the window. The remote flashes green three times when it is paired.
+
+While the pairing window is open, holding MODE for 1 s forgets every paired remote. Pairings are saved and survive a restart.
+
+A paired remote takes control by holding its ARM/GO for 2 s while ST-1 is idle. The screen shows `R1 82%` (slot and battery) for the remote in control. CANCEL from any paired remote always works; ARM, GO and early reveal work only from the remote in control, and ST-1's own buttons always work. The serial monitor logs every remote command and the reason for any refusal.
 
 **The eInk screen is for setup/results; it retains its previous image while an attempt is active. Use the LEDs for live state.** Inactive refreshes may briefly delay button response. There are no eInk refreshes while preparing, armed, counting down or running.
 

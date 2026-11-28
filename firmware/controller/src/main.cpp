@@ -14,6 +14,7 @@
 #include "button.hpp"
 #include "efforts.hpp"
 #include "upload.hpp"
+#include "remotes.hpp"
 #include <lanetime/cue_player.hpp>
 #include <freertos/semphr.h>
 #ifndef JNS_BENCH
@@ -47,6 +48,8 @@ constexpr uint16_t kDistances[]={10,20,30,50};
 uint16_t distance=kDistances[0];
 EffortQueue efforts;
 char notice[64]="";
+Remotes remotes;
+bool pairingShown=false;
 bool dirty=true, radioReady=false, fatalHardware=false;
 struct Received { uint8_t mac[6]; uint8_t data[kPacketSize]; uint64_t at; };
 struct Edge { bool broken; uint64_t at; };
@@ -87,6 +90,11 @@ Packet packet(Kind kind) {
   if (controller->state==State::Running) p.flags|=jns::Running;
   if (controller->state==State::Revealing || controller->state==State::Complete) p.flags|=jns::Complete;
   if (kind==Kind::Reveal) p.finishedMask=controller->finished;
+  if (kind==Kind::Status) {
+    // For remotes: who holds control, whether ST-1 is in fault, and whether ARM would work now.
+    p.finishedMask=uint8_t(remotes.holder()|(controller->state==State::Fault?kControllerFault:0));
+    if (efforts.room()>=controller->lanes && controller->armable(nowUs(),beam.clear(nowUs()))) p.flags|=jns::Ready;
+  }
   p.distance=uint8_t(distance);  // Lets lane displays show speed.
   if (kind==Kind::Status && controller->state==State::Idle && controller->attempt) p.flags|=jns::Retired;
   if (controller->state==State::Fault) p.flags|=jns::Fault;
@@ -105,6 +113,33 @@ bool transmit(Kind kind,uint64_t value=0) {
   if (kind==Kind::Status) p.value=nowUs(); // Common timebase sample for every peer.
   uint8_t bytes[kPacketSize]; encode(p,bytes);
   if (esp_now_send(broadcastMac,bytes,sizeof(bytes))!=ESP_OK) {
+    portENTER_CRITICAL(&radioLock); radioBusy=false; portEXIT_CRITICAL(&radioLock);
+    return false;
+  }
+  return true;
+}
+// Unicast to one remote (its radio acknowledges and retries). The remote resends
+// its command until it hears a reply, so a busy radio here only delays the answer.
+bool addRemotePeer(const uint8_t* mac) {
+  if (JNS_BENCH || !radioReady) return false;
+  if (esp_now_is_peer_exist(mac)) return true;
+  esp_now_peer_info_t peer{}; memcpy(peer.peer_addr,mac,6);
+  peer.channel=JNS_RADIO_CHANNEL; peer.ifidx=WIFI_IF_STA; peer.encrypt=false;
+  return esp_now_add_peer(&peer)==ESP_OK;
+}
+bool replyTo(const uint8_t* mac,const Command& asked,Reply reply,Reason reason,uint16_t arg,uint8_t slot) {
+  if (JNS_BENCH || !radioReady || !addRemotePeer(mac)) return false;
+  portENTER_CRITICAL(&radioLock);
+  const bool busy=radioBusy;
+  if (!busy) radioBusy=true;
+  portEXIT_CRITICAL(&radioLock);
+  if (busy) return false;
+  auto p=packet(Kind::Command);
+  Command c=asked; c.reply=reply; c.reason=reason; c.arg=arg;
+  p.value=packCommand(c); p.finishedMask=0; p.flags&=uint8_t(~jns::Ready);
+  (void)slot;
+  uint8_t bytes[kPacketSize]; encode(p,bytes);
+  if (esp_now_send(mac,bytes,sizeof(bytes))!=ESP_OK) {
     portENTER_CRITICAL(&radioLock); radioBusy=false; portEXIT_CRITICAL(&radioLock);
     return false;
   }
@@ -187,6 +222,14 @@ void paint() {
   display.setCursor(0,36); display.print(stateName(controller->state));
   display.setCursor(0,46); display.print(controller->reason);
   display.setCursor(0,56); display.printf("Lane 1 beam: %s   To upload: %u",beam.clear(nowUs())?"CLEAR":"BROKEN",efforts.pending());
+  if (const uint8_t h=remotes.holder()) {
+    const uint8_t b=remotes.battery(h);
+    if (b<=100) display.printf("   R%u %u%%",h,b); else display.printf("   R%u",h);
+  }
+  uint8_t candidate[6];
+  if (remotes.pairing(nowUs()) && remotes.candidate(candidate)) {
+    display.setCursor(0,46); display.printf("Pair remote %02X%02X?  ARM=yes  CANCEL=no",candidate[4],candidate[5]);
+  }
   if (controller->state==State::Complete) {
     for (uint8_t i=0;i<controller->lanes;++i) {
       display.setCursor(0,68+10*i);
@@ -214,7 +257,12 @@ void startRadio() {
   radioReady=esp_wifi_set_channel(JNS_RADIO_CHANNEL,WIFI_SECOND_CHAN_NONE)==ESP_OK &&
     esp_now_init()==ESP_OK && esp_now_register_recv_cb(received)==ESP_OK &&
     esp_now_register_send_cb(sent)==ESP_OK && esp_now_add_peer(&peer)==ESP_OK;
-  if (!radioReady) { controller->fail("Radio setup failed"); fatalHardware=true; }
+  if (!radioReady) { controller->fail("Radio setup failed"); fatalHardware=true; return; }
+  for (uint8_t slot=1;slot<=Remotes::kSlots;++slot) if (remotes.paired(slot)) addRemotePeer(remotes.mac(slot));
+}
+void saveRemotes() {
+  uint8_t macs[6*Remotes::kSlots]; const uint8_t used=remotes.save(macs);
+  preferences.putBytes("rmac",macs,sizeof(macs)); preferences.putUChar("rused",used);
 }
 // Queue each attempt that riders started, as it ends. Room is checked before arming.
 void takeClosed() {
@@ -231,6 +279,56 @@ void takeClosed() {
     if (Serial.availableForWrite()>80) Serial.printf("EFFORT %s lane=%u %s %lu ms %u m\n",
       e.id,e.lane,outcomeName(e.outcome),(unsigned long)e.ms,e.distance);
   }
+}
+void benchPeers(uint64_t now);
+// The same actions for ST-1's own buttons and for remotes.
+void doCancel(uint64_t now) {
+  controller->cancel(); cancelUntil=now+2000000; transmit(Kind::Cancel); dirty=true;
+}
+bool doGo(uint64_t now) {
+  if (controller->state!=State::Armed || controller->mode!=Mode::Standing) return false;
+  if (!controller->countdown(now)) return false;
+  stopCues(); lastGoSend=0; if (transmit(Kind::Go,controller->goAt)) lastGoSend=nowUs();
+  return true;
+}
+bool doArm(uint64_t now) {
+  if (controller->active()) return false;
+  // Never start an attempt whose efforts could not be kept.
+  if (efforts.room()<controller->lanes) {
+    snprintf(notice,sizeof(notice),"Upload queue full - hold CANCEL to upload");
+    controller->reason=notice; dirty=true; return false;
+  }
+  // No eInk refresh here: it would age readiness observations before ARM.
+  now=nowUs(); benchPeers(now);
+  if (controller->arm(now,beam.clear(now))) { cancelUntil=0; lastArmSend=0; return true; }
+  dirty=true; return false;
+}
+void handleRemote(const uint8_t* mac,const Packet& p,uint64_t at) {
+  Command c;
+  if (!unpackCommand(p.value,c) || p.role!=Role::Remote) return;
+  const uint64_t now=nowUs();
+  RemoteView v;
+  v.session=sessionId; v.attempt=controller->attempt; v.active=controller->active();
+  v.armable=!fatalHardware && efforts.room()>=controller->lanes && controller->armable(now,beam.clear(now));
+  v.canGo=!fatalHardware && controller->state==State::Armed && controller->mode==Mode::Standing;
+  v.canReveal=!fatalHardware && controller->state==State::Running;
+  (void)at;
+  uint8_t seen[6]; const bool hadCandidate=remotes.candidate(seen);
+  RemoteOutcome o=remotes.handle(mac,p,c,v,now);
+  if (!hadCandidate && remotes.candidate(seen)) { dirty=true; lastPaint=0; }  // Show it once.
+  bool done=true;
+  switch (o.action) {
+    case RemoteAction::Cancel: if (!fatalHardware) doCancel(now); break;
+    case RemoteAction::Arm: done=doArm(now); break;
+    case RemoteAction::Go: done=doGo(now); break;
+    case RemoteAction::Reveal: done=controller->reveal(now); break;
+    case RemoteAction::None: break;
+  }
+  if (!done) { remotes.amend(o.slot,Reason::NotReady); o.reply=Reply::Refused; o.reason=Reason::NotReady; }
+  if (c.code==Code::TakeControl && o.reply==Reply::Accepted) dirty=true;
+  if (o.replies) replyTo(mac,c,o.reply,o.reason,0,o.slot);
+  if (o.replies && Serial.availableForWrite()>80) Serial.printf("REMOTE %u cmd=%u seq=%lu age=%u -> %s\n",
+    o.slot,unsigned(c.code),(unsigned long)c.seq,c.arg,o.reply==Reply::Accepted?"accepted":reasonName(o.reason));
 }
 // The JNS Pro pattern: timing radio off, Wi-Fi on to upload, then timing radio back on.
 // Sensors lose ST-1's heartbeat meanwhile and need about 8 s to be Ready again.
@@ -298,6 +396,10 @@ void setup() {
   for (auto d:kDistances) known|=d==distance;
   if (!known) distance=kDistances[0];
   if (!radioQueue || !edgeQueue) { controller->fail("Queue allocation failed"); fatalHardware=true; }
+  {
+    uint8_t macs[6*Remotes::kSlots]={};
+    if (preferences.getBytes("rmac",macs,sizeof(macs))==sizeof(macs)) remotes.restore(macs,preferences.getUChar("rused",0));
+  }
   if (!JNS_BENCH && !fatalHardware) startRadio();
   const double irHz=ledcSetup(irChannel,38000,8);
   ledcAttachPin(txPin,irChannel); ledcWrite(irChannel,0);
@@ -321,7 +423,9 @@ void loop() {
     Received r;
     while (xQueueReceive(radioQueue,&r,0)==pdTRUE) {
       Packet p;
-      if (nowUs()-r.at<=kPeerUs && decode(r.data,sizeof(r.data),p)) controller->observe(r.mac,p,r.at);
+      if (nowUs()-r.at>kPeerUs || !decode(r.data,sizeof(r.data),p)) continue;
+      if (p.role==Role::Remote) handleRemote(r.mac,p,r.at);  // Never a timing peer.
+      else if (p.kind!=Kind::Command) controller->observe(r.mac,p,r.at);
     }
   }
   if (edgeQueue) {
@@ -350,17 +454,53 @@ void loop() {
   bool pressed[4];
   const bool idle=!controller->active() && !fatalHardware;
   for (int i=0;i<4;++i) pressed[i]=button[i].update(digitalRead(buttons[i])==LOW,now,
-      i==3 ? before==State::Running && controller->state==State::Running : (i==0 || i==2) && idle);
+      i==3 ? before==State::Running && controller->state==State::Running : idle);
   const bool revealHeld=button[3].held(now);
   // MODE: tap switches Flying/Standing; hold cycles the distance. CANCEL: hold uploads.
   const bool modeTap=button[0].tapped(), distanceHeld=button[0].held(now);
   const bool uploadHeld=button[2].held(now,2000000);
-  // CANCEL wins over simultaneous GO.
-  if (pressed[2] && !fatalHardware) {
-    controller->cancel(); cancelUntil=now+2000000; transmit(Kind::Cancel); dirty=true;
-  } else if (!fatalHardware) {
+  // LANES: tap steps the lane count; hold 3 s opens remote pairing.
+  const bool lanesTap=button[1].tapped(), pairHeld=button[1].held(now,3000000);
+  // While pairing, the buttons belong to pairing: ARM accepts the remote shown, CANCEL
+  // closes, MODE hold forgets all remotes. Heartbeats and everything else carry on.
+  const bool pairingNow=remotes.pairing(now);
+  if (pairingNow) {
+    uint8_t mac[6];
+    if (pressed[2]) { remotes.closePairing(); snprintf(notice,sizeof(notice),"Pairing closed"); }
+    else if (distanceHeld) {
+      remotes.forget(); saveRemotes(); remotes.closePairing();
+      snprintf(notice,sizeof(notice),"All remotes forgotten");
+    } else if (pressed[3] && remotes.candidate(mac)) {
+      const uint8_t slot=remotes.confirm();
+      Command asked; asked.code=Code::Pair;
+      if (slot) {
+        saveRemotes(); addRemotePeer(mac);
+        // The remote also keeps asking until it hears this; a few copies make it quick.
+        for (int i=0;i<5;++i) { replyTo(mac,asked,Reply::Accepted,Reason::None,slot,slot); delay(20); }
+        snprintf(notice,sizeof(notice),"Remote %u paired (%02X%02X)",slot,mac[4],mac[5]);
+      } else {
+        replyTo(mac,asked,Reply::Refused,Reason::Full,0,0);
+        snprintf(notice,sizeof(notice),"4 remotes paired - MODE hold forgets all");
+      }
+    }
+    if (!remotes.pairing(now)) { controller->reason=notice; dirty=true; lastPaint=0; }
+  } else if (pairingShown) {
+    // The window ran out with nobody accepted.
+    pairingShown=false; snprintf(notice,sizeof(notice),"Pairing closed");
+    controller->reason=notice; dirty=true; lastPaint=0;
+  } else if (pairHeld && !controller->active() && !fatalHardware && !JNS_BENCH) {
+    remotes.openPairing(now); pairingShown=true;
+    snprintf(notice,sizeof(notice),"Pairing 30 s: switch remote on holding both");
+    controller->reason=notice; dirty=true; lastPaint=0;
+  }
+  if (!remotes.pairing(now)) pairingShown=false;
+  // CANCEL wins over simultaneous GO. Neither acts while pairing has the buttons.
+  if (!pairingNow && pressed[2] && !fatalHardware) {
+    if (!controller->active()) remotes.release();  // CANCEL on ST-1 also releases remote control.
+    doCancel(now);
+  } else if (!pairingNow && !fatalHardware) {
     if (revealHeld) controller->reveal(now);
-    if (!controller->active() && (modeTap || distanceHeld || pressed[1])) {
+    if (!controller->active() && (modeTap || distanceHeld || lanesTap)) {
       const bool retire=controller->state!=State::Idle;
       controller->cancel();
       if (retire) { cancelUntil=now+2000000; transmit(Kind::Cancel); }
@@ -370,25 +510,13 @@ void loop() {
         for (uint8_t i=0;i<sizeof(kDistances)/sizeof(kDistances[0]);++i) if (kDistances[i]==distance) next=i+1;
         distance=kDistances[next%(sizeof(kDistances)/sizeof(kDistances[0]))];
       }
-      if (pressed[1]) controller->lanes=controller->lanes%4+1;
+      if (lanesTap) controller->lanes=controller->lanes%4+1;
       saveSettings(); dirty=true;
     }
     if (uploadHeld && !controller->active() && now>=cancelUntil) uploadSession();
     if (pressed[3]) {
-      if (controller->state==State::Armed && controller->mode==Mode::Standing) {
-        if (controller->countdown(now)) { stopCues(); lastGoSend=0; if (transmit(Kind::Go,controller->goAt)) lastGoSend=nowUs(); }
-      } else if (!controller->active()) {
-        // Never start an attempt whose efforts could not be kept.
-        if (efforts.room()<controller->lanes) {
-          snprintf(notice,sizeof(notice),"Upload queue full - hold CANCEL to upload");
-          controller->reason=notice; dirty=true;
-        } else {
-          // No eInk refresh here: it would age readiness observations before ARM.
-          now=nowUs(); benchPeers(now);
-          if (controller->arm(now,beam.clear(now))) { cancelUntil=0; lastArmSend=0; }
-          else dirty=true;
-        }
-      }
+      if (controller->state==State::Armed && controller->mode==Mode::Standing) doGo(now);
+      else doArm(now);
     }
   }
   now=nowUs();

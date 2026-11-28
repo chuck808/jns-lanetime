@@ -4,7 +4,7 @@
 - `include/lanetime/protocol.hpp`: wire contract encoder/decoder (below).
 - `include/lanetime/timebase.hpp`: ST-1 timebase tracking (specification §5.1). Native tests: `sh firmware/shared/tests/run.sh`. Callers must serialise `sample()` (radio callback) against conversions (main loop).
 
-# Prototype wire contract v4
+# Prototype wire contract v5
 
 `include/lanetime/protocol.hpp` is the portable encoder/decoder used by ST-1. Controller, external starts, all four finishes and lane displays use this contract; spare firmware remains unimplemented. This contract may change during bench testing and has no JNS_Timing code dependency.
 
@@ -13,22 +13,47 @@ ESP-NOW broadcast uses an exact 41-byte payload. Integers are unsigned little-en
 | Offset | Bytes | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `JNSL` |
-| 4 | 1 | Version = 4 (earlier versions are rejected) |
-| 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7 |
-| 6 | 1 | Sender role: Controller=1, Start=2, Finish=3 |
-| 7 | 1 | Sender lane 1–4; controller always lane 1 |
+| 4 | 1 | Version = 5 (earlier versions are rejected) |
+| 5 | 1 | Kind: Status=1, Arm=2, Cancel=3, Go=4, Start=5, Result=6, Reveal=7, Command=8 |
+| 6 | 1 | Sender role: Controller=1, Start=2, Finish=3, Remote=4 |
+| 7 | 1 | Sender lane 1–4; controller always lane 1; a remote sends its paired slot 1–4 (1 before pairing) |
 | 8 | 4 | System ID |
 | 12 | 8 | Controller session: random nonzero per controller boot |
 | 20 | 4 | Attempt: incremented on each accepted ARM |
 | 24 | 1 | Mode: Flying=0, Standing=1 |
 | 25 | 1 | Enabled-lane mask, bits 0–3 |
 | 26 | 1 | Flags: Ready=1, Armed=2, Running=4, Complete=8, Fault=16, Cued=32, Retired=64 |
-| 27 | 1 | Reveal: finished-lane mask, bits 0–3; otherwise reserved, zero |
+| 27 | 1 | Reveal: finished-lane mask, bits 0–3. Controller Status: bits 0–2 = paired remote holding control (0 none, 1–4), bit 7 = ST-1 in fault. Otherwise zero |
 | 28 | 8 | See *Value field* below |
 | 36 | 4 | Sender boot token, random nonzero per boot |
 | 40 | 1 | Distance in metres set on ST-1, in controller packets; 0 = not set. Must be 0 from start and finish posts |
 
-v4 added byte 40 so lane displays can show average speed. Reflash every unit together: v3 units cannot decode v4 packets.
+v4 added byte 40 so lane displays can show average speed. v5 added the Remote role, the Command kind and the control-holder byte. Reflash every unit together: a unit on an older version cannot decode newer packets.
+
+ST-1 sets the Ready flag in its Status only when an ARM would be accepted right now (sensors ready, beam clear, room in the effort queue). Start and finish posts ignore it.
+
+## Remote commands (v5)
+
+A remote sends only Command packets, unicast to its paired ST-1, which answers each one unicast. The remote copies ST-1's latest session, attempt, mode and lane mask from its Status into every Command. The command itself is packed into the value field:
+
+| Bits | Field |
+| --- | --- |
+| 0–7 | Code: Hello=1, Arm=2, Go=3, Cancel=4, Reveal=5, TakeControl=6, Pair=7 |
+| 8–15 | Reply: Request=0 (remote to ST-1), Accepted=1, Refused=2 |
+| 16–23 | Reason when refused: NotPaired=1, NotInControl=2, TooLate=3, WrongAttempt=4, WrongSession=5, NotReady=6, Busy=7, Full=8, Bad=9 |
+| 24–39 | Argument: milliseconds since the button was pressed (presses); battery percent, 255 unknown (Hello); assigned slot (accepted Pair) |
+| 40–63 | Sequence number, per remote boot |
+
+Rules ST-1 applies (in `firmware/controller/include/remotes.hpp`, with tests):
+
+- Only paired remotes are heard. Others get NotPaired. Pair requests are only noticed while ST-1's pairing window is open, and only a person confirming on ST-1 pairs one.
+- **CANCEL is accepted from any paired remote, at any time, however old.**
+- ARM, GO and REVEAL are accepted only from the remote holding control, for the current session and attempt, if pressed no more than 250 ms ago and only when ST-1 could act on them now.
+- TakeControl succeeds when nobody holds control, the asker already does, or the holder has been silent for 30 s. Never during an attempt. CANCEL on ST-1 itself releases control; ST-1's own buttons always work.
+- The same sequence number is answered again but acted on once. An older one is refused.
+- Hello (every 2 s while awake) reports battery and presence; it gets no reply.
+
+There is no encryption: pairing plus the address allow-list keeps out accidental interference, not a determined attacker. ESP-NOW per-peer encryption is the planned follow-up.
 
 ## Value field
 
@@ -42,6 +67,7 @@ v4 added byte 40 so lane displays can show average speed. Reflash every unit tog
 | Result | Elapsed microseconds, computed from start and finish in ST-1 time |
 | Reveal | Scheduled reveal time in ST-1 time |
 | Arm, Cancel | Zero |
+| Command | Packed command; see *Remote commands* |
 
 Identity is ESP-NOW source MAC plus announced role/lane and boot token. The system ID is an accidental-mixing filter, not authentication. Reject invalid encodings, other systems, unknown versions, unexpected roles and stale sessions/attempts.
 
